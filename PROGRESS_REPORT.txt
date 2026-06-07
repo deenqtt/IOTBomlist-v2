@@ -1,0 +1,205 @@
+================================================================================
+  IOT BOM LIST v2 — ITEMS TAB PROGRESS REPORT
+  Date: 2026-06-02
+================================================================================
+
+SUMMARY
+-------
+All 7 requirements from management have been implemented in the Items tab.
+Additional UI/UX polish was also applied beyond the original requirements.
+
+
+--------------------------------------------------------------------------------
+REQUIREMENT 1 — Key Column Highlighting
+--------------------------------------------------------------------------------
+STATUS: DONE
+
+Columns Stable ID, Part Number MFR, Package, and Value are visually
+distinguished from secondary columns:
+  - Stable ID: monospace font, primary color, subtle pill background
+  - Part Number MFR: bold weight
+  - Package: bold, monospace, muted pill background
+  - Value: bold weight
+  - Secondary columns (Category, Specs, Price, Suppliers, Stock): normal weight
+
+Screenshot needed: Items table with data loaded.
+
+
+--------------------------------------------------------------------------------
+REQUIREMENT 2 — 4 Supplier Part Numbers per Item
+--------------------------------------------------------------------------------
+STATUS: DONE
+
+Each component stores part numbers for 4 sources:
+  - LCSC / JLCPCB  (blue badge)
+  - Mouser         (green badge)
+  - DigiKey        (orange badge)
+  - Other          (gray badge)
+
+Stored as JSON in the database field "supplierPrices". Each entry includes:
+  pn, price, moq, priceBreaks, url, availability, quantity_available.
+
+In the table: compact colored badges (LCSC / Mouser / DK / Other) with
+tooltip showing full PN and price on hover.
+
+In Edit modal: each supplier has its own Part Number input field.
+
+Screenshot needed: Items table row with multiple supplier badges visible.
+
+
+--------------------------------------------------------------------------------
+REQUIREMENT 3 — Alternatives Feature
+--------------------------------------------------------------------------------
+STATUS: DONE
+
+Two-tab panel opens when clicking the "Git Merge" icon on any row.
+
+Tab 1 — "From Database":
+  Backend searches for components matching ALL of:
+    - Same Value
+    - Same Package
+    - Same Voltage Rating (if present)
+    - Same Tolerance (if present)
+  Shows candidates with Link / Unlink buttons.
+  Linking is bidirectional (both items updated simultaneously).
+
+Tab 2 — "Search Suppliers":
+  Searches LCSC, Mouser, and DigiKey by keyword (Value + Package).
+  Shows "X% cheaper" green badge when supplier price < current item price.
+
+Screenshot needed: AlternativesPanel open on an item with alternatives.
+
+
+--------------------------------------------------------------------------------
+REQUIREMENT 4 — Add Item Flow (Search → Pick → Details → Save)
+--------------------------------------------------------------------------------
+STATUS: DONE
+
+3-step modal when clicking "Add Component":
+
+  Step 1 — Search MPN:
+    - Enter part number and optional manufacturer
+    - Duplicate check runs first (blocks if exact match found)
+    - On proceed: searches LCSC, Mouser, DigiKey simultaneously
+
+  Step 2 — Pick Supplier PNs:
+    - Tab per supplier (LCSC / Mouser / DigiKey)
+    - Each tab shows results with price, MOQ, stock
+    - Click a result to select it (click again to deselect)
+    - Can select one PN per supplier
+    - NOTE: LCSC only supports C-code lookup (e.g. C7972), not keyword search.
+            For keyword search, use Mouser or DigiKey tabs.
+
+  Step 3 — Fill Details:
+    - Form pre-filled from best result (MPN, manufacturer, description, price)
+    - Fields: Stable ID, MPN, Manufacturer, Package, Value,
+              Voltage Rating, Tolerance, WH Location, Datasheet/Link
+    - Save creates item with all selected supplier PNs stored
+
+Screenshot needed: Each step of the AddItemSearchModal.
+
+
+--------------------------------------------------------------------------------
+REQUIREMENT 5 — Auto-Find Alternatives from 3 Suppliers
+--------------------------------------------------------------------------------
+STATUS: DONE
+
+In the Alternatives panel (the GitMerge button on each row):
+  - Tab "Search Suppliers" auto-searches by "{Value} {Package}" keyword
+  - Shows results from LCSC, Mouser, DigiKey in sub-tabs
+  - Each result shows price comparison vs current item
+  - Green badge shows "X% cheaper" when alternative is less expensive
+
+Screenshot needed: Alternatives panel "Search Suppliers" tab with results.
+
+
+--------------------------------------------------------------------------------
+REQUIREMENT 6 — Smart Filter Cascade (Category → Package)
+--------------------------------------------------------------------------------
+STATUS: DONE
+
+In the filter bar:
+  - "All Categories" dropdown shows all categories from database
+  - "All Packages" dropdown cascades — when a category is selected,
+    only packages belonging to that category appear
+  - Selecting a new category automatically resets the package filter
+
+Active filter chips appear below the filter bar showing what is currently
+filtered. Each chip has an X to remove that single filter.
+
+Screenshot needed: Filter bar with a category selected and package dropdown
+showing filtered options.
+
+
+--------------------------------------------------------------------------------
+REQUIREMENT 7 — Duplicate Check on Add
+--------------------------------------------------------------------------------
+STATUS: DONE
+
+When entering a part number in Step 1 of Add Component modal:
+  - Before searching suppliers, the system checks the database
+  - Checks: same Part Number (case-insensitive) + same Manufacturer
+  - If duplicate found: shows amber warning box with existing Stable ID
+  - Flow stops — user must clear or change the input before proceeding
+
+Backend also returns HTTP 409 Conflict if duplicate slips through to save.
+
+Screenshot needed: Duplicate warning shown in AddItemSearchModal Step 1.
+
+
+================================================================================
+ADDITIONAL IMPROVEMENTS (beyond original requirements)
+================================================================================
+
+UI / UX Polish:
+  - Replaced native HTML <select> dropdowns with Radix UI Select component
+    (animated, keyboard-accessible, origin-aware popover animation)
+  - Modals now use Radix UI Dialog with backdrop blur + scale animation
+    (enter: 200ms ease-out, exit: 150ms — faster exit feels more responsive)
+  - Table reduced from 14 columns to 10 (removed: Product Name, WH, Link column;
+    merged VR + Tolerance into one "Specs" column)
+  - Row actions (Edit, Delete, Price Lookup, Alternatives) are hidden by
+    default and appear on row hover — keeps the table clean
+  - Skeleton loading rows show while data is fetching
+  - Stock badge has color coding:
+      Red    = 0 units
+      Amber  = 1–9 units (low stock)
+      Normal = 10+ units
+  - Full English UI (all Indonesian strings removed)
+  - "Add Component" button only visible to Admin/Super roles
+  - Pagination hidden when no data
+
+API Integrations:
+  - Mouser API: API key configured, keyword search working
+  - DigiKey OAuth2: client credentials flow, token cached in memory,
+    search working (fixed empty results bug — ExactMatches array was
+    truthy even when empty, causing Products to never be checked)
+  - LCSC: works via JLC Sidecar (C-code lookup only, e.g. C7972)
+
+Database:
+  - Added fields: voltageRating, tolerance (via Prisma db push)
+  - supplierPrices stored as JSON string per item
+
+
+================================================================================
+KNOWN LIMITATIONS
+================================================================================
+
+1. LCSC keyword search not supported.
+   The JLC sidecar only supports C-code lookup (C7972 format).
+   Keyword search (e.g. "LM358") returns empty from LCSC.
+   Options to resolve: add LCSC unofficial API route, or allow manual
+   C-code input in the search step.
+
+2. Alternatives matching is exact string match.
+   If one item has Value "100nF" and another has "0.1uF", they won't match
+   even though they're equivalent. Users must standardize value formatting.
+
+3. Price data in database is not auto-updated.
+   The "Price Lookup" feature (Zap icon) fetches live prices, but does not
+   automatically write back to the item's stored price.
+
+
+================================================================================
+END OF REPORT
+================================================================================

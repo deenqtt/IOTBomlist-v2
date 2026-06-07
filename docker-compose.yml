@@ -1,0 +1,61 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: bom-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-bom}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-bom}
+      POSTGRES_DB: ${DB_NAME:-bom_v2}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5435:5432"
+
+  sidecar:
+    build: ./jlc-sidecar
+    container_name: bom-sidecar
+    restart: always
+    environment:
+      JLC_APP_ID: ${JLC_APP_ID}
+      JLC_ACCESS_KEY: ${JLC_ACCESS_KEY}
+      JLC_SECRET_KEY: ${JLC_SECRET_KEY}
+      JLC_PORT: 8089
+    ports:
+      - "8089:8089"
+
+  backend:
+    build: ./backend
+    container_name: bom-backend
+    restart: always
+    depends_on:
+      - db
+      - sidecar
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-bom}:${DB_PASSWORD:-bom}@db:5432/${DB_NAME:-bom_v2}?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      AUTH_COOKIE_SECRET: ${AUTH_COOKIE_SECRET}
+      PORT: 8001
+      JLC_SIDECAR_URL: http://sidecar:8089
+      MOUSER_API_KEY: ${MOUSER_API_KEY}
+      DIGIKEY_CLIENT_ID: ${DIGIKEY_CLIENT_ID}
+      DIGIKEY_CLIENT_SECRET: ${DIGIKEY_CLIENT_SECRET}
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./backend/uploads:/app/uploads
+
+  frontend:
+    build: 
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+    container_name: bom-frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

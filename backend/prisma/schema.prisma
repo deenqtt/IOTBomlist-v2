@@ -1,0 +1,195 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  role         String   @default("user") // user | admin | super
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+}
+
+model Product {
+  id             Int               @id @default(autoincrement())
+  name           String            @unique
+  slug           String?           @unique
+  imageUrl       String?           @map("image_url")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  items          ProductItem[]
+  relations      ProductRelation[] @relation("ParentRelations")
+  childRelations ProductRelation[] @relation("ChildRelations")
+
+  @@map("products")
+}
+
+model Item {
+  stableId       String        @id @map("stable_id")
+  partNumber     String?       @map("part_number")
+  productName    String?       @map("product_name")
+  value          String?
+  description    String?
+  alternate      String?
+  category       String?
+  package        String?
+  stockCode      String?       @map("stock_code")
+  suppliers      String?
+  links          String?
+  priceMin       Float?        @map("price_min")
+  priceCurrency  String?       @default("USD") @map("price_currency")
+  manufacturer   String?
+  stockQty       Int?          @map("stock_qty")
+  imageUrl       String?       @map("image_url")
+  stockStatus    String?       @map("stock_status")
+  stockAvailable Boolean?      @map("stock_available")
+  whQty          Float?        @map("wh_qty")
+  whLocation     String?       @map("wh_location")
+  voltageRating  String?       @map("voltage_rating")
+  tolerance      String?
+  supplierPrices String?       @map("supplier_prices") // JSON blob: { lcsc, mouser, digikey, other } each { pn, price, moq, priceBreaks }
+  alternatives   String?       // semicolon-separated stable_ids
+  products       ProductItem[]
+
+  @@map("items")
+}
+
+model ProductItem {
+  productId    Int     @map("product_id")
+  stableId     String  @map("stable_id")
+  quantitySum  Float?  @map("quantity_sum")
+  references   String?
+  notes        String?
+  alternatives String?
+  product      Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  item         Item    @relation(fields: [stableId], references: [stableId], onDelete: Cascade)
+
+  @@id([productId, stableId])
+  @@map("product_items")
+}
+
+model ProductRelation {
+  parentId Int     @map("parent_id")
+  childId  Int     @map("child_id")
+  relation String?
+  parent   Product @relation("ParentRelations", fields: [parentId], references: [id], onDelete: Cascade)
+  child    Product @relation("ChildRelations", fields: [childId], references: [id], onDelete: Cascade)
+
+  @@id([parentId, childId])
+  @@map("product_relations")
+}
+
+model ConfigSet {
+  id            Int             @id @default(autoincrement())
+  name          String          @unique
+  parentSetId   Int?            @map("parent_set_id")
+  notes         String?
+  createdBy     String?         @map("created_by")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+  parent        ConfigSet?      @relation("SetInheritance", fields: [parentSetId], references: [id])
+  children      ConfigSet[]     @relation("SetInheritance")
+  items         ConfigSetItem[]
+  supersetItems SupersetItem[]
+  documents     Document[]
+
+  @@map("config_sets")
+}
+
+model ConfigSetItem {
+  id            Int       @id @default(autoincrement())
+  setId         Int       @map("set_id")
+  orderIndex    Int       @default(0) @map("order_index")
+  mainProductId Int       @map("main_product_id")
+  op            String    @default("set_qty") // set_qty | add | remove
+  variantIds    String?   @map("variant_ids") // JSON array
+  qty           Float     @default(1.0)
+  set           ConfigSet @relation(fields: [setId], references: [id], onDelete: Cascade)
+
+  @@unique([setId, orderIndex])
+  @@map("config_set_items")
+}
+
+model Superset {
+  id        Int            @id @default(autoincrement())
+  name      String         @unique
+  notes     String?
+  createdBy String?        @map("created_by")
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+  items     SupersetItem[]
+
+  @@map("supersets")
+}
+
+model SupersetItem {
+  id         Int       @id @default(autoincrement())
+  supersetId Int       @map("superset_id")
+  orderIndex Int       @default(0) @map("order_index")
+  setId      Int       @map("set_id")
+  qty        Float     @default(1.0)
+  superset   Superset  @relation(fields: [supersetId], references: [id], onDelete: Cascade)
+  set        ConfigSet @relation(fields: [setId], references: [id])
+
+  @@unique([supersetId, orderIndex])
+  @@map("superset_items")
+}
+
+model Software {
+  id         Int        @id @default(autoincrement())
+  name       String     @unique
+  slug       String?    @unique
+  category   String?
+  websiteUrl String?    @map("website_url")
+  license    String?
+  notes      String?
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+  documents  Document[]
+
+  @@map("software")
+}
+
+model Document {
+  id          Int        @id @default(autoincrement())
+  productId   Int?       @map("product_id")
+  softwareId  Int?       @map("software_id")
+  setId       Int?       @map("set_id")
+  type        String
+  storageKind String     @default("url") @map("storage_kind")
+  pathOrUrl   String     @map("path_or_url")
+  checksum    String?
+  uploadedBy  String?    @map("uploaded_by")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  software    Software?  @relation(fields: [softwareId], references: [id])
+  configSet   ConfigSet? @relation(fields: [setId], references: [id])
+
+  @@map("documents")
+}
+
+model ChangeLog {
+  id        Int      @id @default(autoincrement())
+  entity    String
+  entityId  String   @map("entity_id")
+  field     String?
+  oldValue  String?  @map("old_value")
+  newValue  String?  @map("new_value")
+  changedBy String?  @map("changed_by")
+  changedAt DateTime @default(now()) @map("changed_at")
+  context   String?
+
+  @@map("change_log")
+}
+
+model SystemSetting {
+  key   String @id
+  value String
+
+  @@map("system_settings")
+}
