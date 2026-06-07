@@ -27,13 +27,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set lower case owner name
+        run: |
+          echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}
+        env:
+          OWNER: ${{ github.repository_owner }}
+
       # 1. Build & Push JLC Sidecar
       - name: Build and push Sidecar
         uses: docker/build-push-action@v5
         with:
           context: ./jlc-sidecar
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-sidecar:latest
+          tags: ${{ env.REGISTRY }}/${{ env.OWNER_LC }}/iotbomlist-v2-sidecar:latest
 
       # 2. Build & Push Backend
       - name: Build and push Backend
@@ -41,10 +47,9 @@ jobs:
         with:
           context: ./backend
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-backend:latest
+          tags: ${{ env.REGISTRY }}/${{ env.OWNER_LC }}/iotbomlist-v2-backend:latest
 
       # 3. Build & Push Frontend
-      # Note: Frontend needs NEXT_PUBLIC_API_URL during build time
       - name: Build and push Frontend
         uses: docker/build-push-action@v5
         with:
@@ -52,4 +57,4 @@ jobs:
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-frontend:latest
+          tags: ${{ env.REGISTRY }}/${{ env.OWNER_LC }}/iotbomlist-v2-frontend:latest
