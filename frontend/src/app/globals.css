@@ -1,0 +1,180 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── shadcn base tokens ─────────────────────────────── */
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221 83% 53%;
+    --radius: 0.5rem;
+
+    /* ── sidebar design tokens ──────────────────────────── */
+    --sidebar:                 210 20% 98%;
+    --sidebar-foreground:      222 47% 11%;
+    --sidebar-border:          214 20% 88%;
+
+    --nav-hover-bg:            214 20% 93%;
+    --nav-active-bg:           221 83% 94%;
+    --nav-active-indicator:    221 83% 53%;
+    --nav-active-text:         221 70% 28%;
+
+    --nav-section-label:       215 16% 50%;
+
+    --search-bg:               210 20% 95%;
+    --search-border:           214 20% 85%;
+
+    --workspace-bg:            210 20% 95%;
+
+    /* ── login page ─────────────────────────────────────── */
+    --login-bg:                214 30% 96%;
+    --login-dot:               214 20% 82%;
+    --login-card:              0 0% 100%;
+    --login-card-border:       214 20% 88%;
+    --login-shadow:            221 40% 20% / 0.12;
+    --login-input-bg:          210 20% 98%;
+    --login-input-border:      214 20% 86%;
+  }
+
+  .dark {
+    /* ── shadcn base tokens ─────────────────────────────── */
+    /* All surfaces use hue 224, sat 12-15% — only lightness differs  */
+    --background:              224 15% 9%;   /* main content — lighter  */
+    --foreground:              214 20% 94%;
+    --card:                    224 15% 11%;  /* cards — slightly lighter */
+    --card-foreground:         214 20% 94%;
+    --popover:                 224 15% 11%;
+    --popover-foreground:      214 20% 94%;
+    --primary:                 221 83% 62%;
+    --primary-foreground:      224 15% 9%;
+    --secondary:               224 12% 15%;
+    --secondary-foreground:    214 20% 90%;
+    --muted:                   224 12% 14%;
+    --muted-foreground:        215 12% 55%;
+    --accent:                  224 12% 15%;
+    --accent-foreground:       214 20% 90%;
+    --destructive:             0 70% 45%;
+    --destructive-foreground:  214 20% 98%;
+    --border:                  224 12% 17%;
+    --input:                   224 12% 17%;
+    --ring:                    221 83% 62%;
+
+    /* ── sidebar design tokens ──────────────────────────── */
+    --sidebar:                 224 15% 7%;   /* darker than background  */
+    --sidebar-foreground:      214 20% 94%;
+    --sidebar-border:          224 12% 13%;
+
+    --nav-hover-bg:            224 12% 12%;
+    --nav-active-bg:           221 40% 16%;
+    --nav-active-indicator:    221 83% 62%;
+    --nav-active-text:         221 83% 83%;
+
+    --nav-section-label:       215 12% 42%;
+
+    --search-bg:               224 12% 11%;
+    --search-border:           224 12% 16%;
+
+    --workspace-bg:            224 15% 6%;
+
+    /* ── login page ─────────────────────────────────────── */
+    --login-bg:                224 15% 7%;
+    --login-dot:               224 12% 14%;
+    --login-card:              224 15% 10%;
+    --login-card-border:       224 12% 16%;
+    --login-shadow:            0 0% 0% / 0.5;
+    --login-input-bg:          224 12% 12%;
+    --login-input-border:      224 12% 18%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ── command palette ─────────────────────────────────────── */
+[cmdk-root] {
+  width: 100%;
+}
+
+[cmdk-input] {
+  width: 100%;
+  background: transparent;
+  outline: none;
+  border: none;
+  font-size: 14px;
+  color: hsl(var(--foreground));
+}
+
+[cmdk-input]::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+
+[cmdk-list] {
+  overflow-y: auto;
+  max-height: 320px;
+  padding: 4px;
+}
+
+[cmdk-group-heading] {
+  padding: 6px 8px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: hsl(var(--muted-foreground));
+  user-select: none;
+}
+
+[cmdk-item] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 120ms ease-out;
+}
+
+[cmdk-item][aria-selected='true'],
+[cmdk-item]:hover {
+  background: hsl(var(--accent));
+}
+
+[cmdk-empty] {
+  padding: 20px;
+  text-align: center;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+
+[cmdk-separator] {
+  height: 1px;
+  background: hsl(var(--border));
+  margin: 4px 0;
+}
