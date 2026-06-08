@@ -145,5 +145,5 @@ export interface ProductDocument {
 
 export interface AnalyzeImportResult {
   matched: { identifier: string; stableId: string; partNumber?: string; productName?: string; qty: number; resolvedMpn?: string; lcscCode?: string }[]
-  notFound: { identifier: string; qty: number; resolvedMpn?: string; lcscCode?: string }[]
+  notFound: { identifier: string; qty: number; resolvedMpn?: string; lcscCode?: string; url?: string }[]
 }

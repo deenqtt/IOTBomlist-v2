@@ -112,7 +112,7 @@ interface SupplierData {
   description?: string;
   price?: number | null;
   moq?: number | null;
-  priceBreaks?: unknown[] | null;
+  priceBreaks?: { qtyFrom: number; qtyTo: number | null; unitPrice: number }[] | null;
   package?: string | null;
   category?: string | null;
   value?: string | null;
