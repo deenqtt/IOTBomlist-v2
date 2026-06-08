@@ -12,10 +12,12 @@ fi
 
 # Seed only on first run (when no users exist)
 USER_COUNT=$(node -e "
-const { PrismaClient } = require('@prisma/client');
-const p = new PrismaClient();
-p.user.count().then(n => { console.log(n); p.\$disconnect(); }).catch(() => { console.log(0); p.\$disconnect(); });
-")
+try {
+  const { PrismaClient } = require('@prisma/client');
+  const p = new PrismaClient();
+  p.user.count().then(n => { console.log(n); p.\$disconnect(); }).catch(() => { console.log(0); try { p.\$disconnect(); } catch(_) {} });
+} catch(e) { console.log(0); }
+" 2>/dev/null) || USER_COUNT=0
 
 if [ "$USER_COUNT" = "0" ]; then
   echo "[entrypoint] No users found — running seed..."

@@ -111,7 +111,7 @@ DIGIKEY_CLIENT_SECRET=${DIGIKEY_CLIENT_SECRET}
 NEXT_PUBLIC_API_URL=http://${SERVER_HOST}:8001
 
 # CORS
-ALLOWED_ORIGINS=http://${SERVER_HOST}:8080
+ALLOWED_ORIGINS=http://${SERVER_HOST}:8082
 EOF
 chmod 600 .env
 success ".env production dibuat (permissions: 600)"
@@ -210,7 +210,7 @@ services:
       - frontend
       - backend
     ports:
-      - "8080:80"
+      - "8082:80"
       - "8001:8001"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
@@ -353,7 +353,7 @@ echo ""
 echo "=================================================="
 success "Setup selesai!"
 echo ""
-echo "  Frontend : http://${SERVER_HOST}:8080"
+echo "  Frontend : http://${SERVER_HOST}:8082"
 echo "  API      : http://${SERVER_HOST}:8001"
 echo ""
 warn "WAJIB: Ganti password default setelah login pertama!"
