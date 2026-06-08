@@ -112,7 +112,7 @@ interface SupplierData {
   description?: string;
   price?: number | null;
   moq?: number | null;
-  priceBreaks?: any[] | null;
+  priceBreaks?: unknown[] | null;
   package?: string | null;
   category?: string | null;
   value?: string | null;
@@ -783,7 +783,7 @@ function ImportBomModal({ productId, productName, onClose }: ImportBomModalProps
             if (!found) {
               console.log(`[PCB Search] → LCSC keyword search: "${searchPn}"`)
               const res = await api.post("/lcsc/search", { keyword: searchPn, limit: 5 });
-              const lcscMatch = res.data?.items?.find((r: any) => r.mpn?.toLowerCase() === searchPn.toLowerCase()) || res.data?.items?.[0];
+              const lcscMatch = res.data?.items?.find((r: { mpn?: string; lcsc?: string }) => r.mpn?.toLowerCase() === searchPn.toLowerCase()) || res.data?.items?.[0];
               if (lcscMatch?.lcsc) {
                 found = await doLcscLookup(lcscMatch.lcsc);
                 if (found) source = "lcsc";
@@ -867,7 +867,7 @@ function ImportBomModal({ productId, productName, onClose }: ImportBomModalProps
               m.identifier === item.identifier ? { ...m, status: "not_found" } : m
             ));
           }
-        } catch (e: any) {
+        } catch (e: unknown) {
           console.error(`[PCB Search] Error for ${item.identifier}:`, e);
           setMissingItems(prev => prev.map(m =>
             m.identifier === item.identifier ? { ...m, status: "not_found" } : m

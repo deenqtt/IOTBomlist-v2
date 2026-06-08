@@ -93,7 +93,7 @@ interface SupplierData {
   description?: string
   price?: number | null
   moq?: number | null
-  priceBreaks?: any[] | null
+  priceBreaks?: unknown[] | null
   package?: string | null
   category?: string | null
   value?: string | null
@@ -336,7 +336,7 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
             
             if (!found) {
               const res = await api.post("/lcsc/search", { keyword: searchPn, limit: 5 });
-              const lcscMatch = res.data?.items?.find((r: any) => r.mpn?.toLowerCase() === searchPn.toLowerCase()) || res.data?.items?.[0];
+              const lcscMatch = res.data?.items?.find((r: { mpn?: string; lcsc?: string }) => r.mpn?.toLowerCase() === searchPn.toLowerCase()) || res.data?.items?.[0];
               if (lcscMatch?.lcsc) {
                 found = await doLcscLookup(lcscMatch.lcsc);
                 if (found) source = "lcsc";
