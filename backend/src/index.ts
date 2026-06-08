@@ -24,12 +24,37 @@ import { performAutoBackup } from './lib/backup.js'
 
 const app = new Hono()
 
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:3000', 'http://localhost:3001']
+
 app.use('*', logger())
 app.use('*', cors({
-  origin: '*',
+  origin: (origin) => ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
   allowHeaders: ['Content-Type', 'Authorization'],
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  credentials: true,
 }))
+
+// Security headers
+app.use('*', async (c, next) => {
+  await next()
+  c.header('X-Content-Type-Options', 'nosniff')
+  c.header('X-Frame-Options', 'DENY')
+  c.header('X-XSS-Protection', '1; mode=block')
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  c.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+})
+
+// Request body size limit (10MB)
+app.use('*', async (c, next) => {
+  const contentLength = c.req.header('content-length')
+  const MAX_BODY = 10 * 1024 * 1024 // 10MB
+  if (contentLength && Number(contentLength) > MAX_BODY) {
+    return c.json({ error: 'Request body too large' }, 413)
+  }
+  await next()
+})
 
 app.get('/health', (c) => c.json({ status: 'ok' }))
 

@@ -1,31 +1,41 @@
-FROM node:20-slim
+# Stage 1: Build
+FROM node:20-slim AS builder
 
-# Install OpenSSL for Prisma
 RUN apt-get update && apt-get install -y openssl python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
-# Copy prisma schema first for generation
 COPY prisma ./prisma/
 RUN npx prisma generate
 
-# Copy source and config
 COPY tsconfig.json .
 COPY prisma.config.ts .
 COPY src ./src/
-COPY templates ./templates/
-
-# Build the project
 RUN npm run build
 
-# Copy entrypoint script
+# Stage 2: Runner (lean — no build tools, no devDependencies, no source .ts)
+FROM node:20-slim AS runner
+
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY prisma ./prisma/
+RUN npx prisma generate
+
+COPY --from=builder /app/dist ./dist/
+COPY templates ./templates/
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 
 EXPOSE 8001
 
-# Run the entrypoint script
 ENTRYPOINT ["./entrypoint.sh"]

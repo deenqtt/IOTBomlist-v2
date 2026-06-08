@@ -7,8 +7,8 @@ const items = new Hono<{ Variables: { user: AuthUser } }>()
 items.use('*', authMiddleware)
 
 items.get('/', async (c) => {
-  const skip = Number(c.req.query('skip') || 0)
-  const limit = Number(c.req.query('limit') || 100)
+  const skip = Math.max(0, Number(c.req.query('skip') || 0))
+  const limit = Math.min(500, Math.max(1, Number(c.req.query('limit') || 100)))
   const q = c.req.query('q')
   const category = c.req.query('category')
   const supplier = c.req.query('supplier')

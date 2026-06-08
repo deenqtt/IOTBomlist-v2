@@ -7,54 +7,91 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME_PREFIX: ${{ github.repository_owner }}/iotbomlist-v2
 
 jobs:
-  build-and-push:
+  set-env:
     runs-on: ubuntu-latest
+    outputs:
+      owner_lc: ${{ steps.lower.outputs.owner_lc }}
+      sha_short: ${{ steps.sha.outputs.sha_short }}
+    steps:
+      - name: Lowercase owner
+        id: lower
+        run: echo "owner_lc=${OWNER,,}" >> $GITHUB_OUTPUT
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Short SHA
+        id: sha
+        run: echo "sha_short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+  build-sidecar:
+    runs-on: ubuntu-latest
+    needs: set-env
     permissions:
       contents: read
       packages: write
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set lower case owner name
-        run: |
-          echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}
-        env:
-          OWNER: ${{ github.repository_owner }}
-
-      # 1. Build & Push JLC Sidecar
-      - name: Build and push Sidecar
-        uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v5
         with:
           context: ./jlc-sidecar
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.OWNER_LC }}/iotbomlist-v2-sidecar:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ needs.set-env.outputs.owner_lc }}/iotbomlist-v2-sidecar:latest
+            ${{ env.REGISTRY }}/${{ needs.set-env.outputs.owner_lc }}/iotbomlist-v2-sidecar:${{ needs.set-env.outputs.sha_short }}
 
-      # 2. Build & Push Backend
-      - name: Build and push Backend
-        uses: docker/build-push-action@v5
+  build-backend:
+    runs-on: ubuntu-latest
+    needs: set-env
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
         with:
           context: ./backend
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.OWNER_LC }}/iotbomlist-v2-backend:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ needs.set-env.outputs.owner_lc }}/iotbomlist-v2-backend:latest
+            ${{ env.REGISTRY }}/${{ needs.set-env.outputs.owner_lc }}/iotbomlist-v2-backend:${{ needs.set-env.outputs.sha_short }}
 
-      # 3. Build & Push Frontend
-      - name: Build and push Frontend
-        uses: docker/build-push-action@v5
+  build-frontend:
+    runs-on: ubuntu-latest
+    needs: set-env
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
         with:
           context: ./frontend
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
-          tags: ${{ env.REGISTRY }}/${{ env.OWNER_LC }}/iotbomlist-v2-frontend:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ needs.set-env.outputs.owner_lc }}/iotbomlist-v2-frontend:latest
+            ${{ env.REGISTRY }}/${{ needs.set-env.outputs.owner_lc }}/iotbomlist-v2-frontend:${{ needs.set-env.outputs.sha_short }}

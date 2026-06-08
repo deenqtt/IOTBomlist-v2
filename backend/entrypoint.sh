@@ -1,11 +1,28 @@
 #!/bin/sh
 set -e
 
-# Run DB push to ensure schema is up to date
-npx prisma db push --accept-data-loss
+# Apply schema: use migrate deploy if migrations exist, else db push (safe — no --accept-data-loss)
+if [ -d "/app/prisma/migrations" ] && [ "$(ls -A /app/prisma/migrations 2>/dev/null)" ]; then
+  echo "[entrypoint] Running prisma migrate deploy..."
+  npx prisma migrate deploy
+else
+  echo "[entrypoint] No migrations found — running prisma db push..."
+  npx prisma db push
+fi
 
-# Seed initial data
-node dist/src/seed.js
+# Seed only on first run (when no users exist)
+USER_COUNT=$(node -e "
+const { PrismaClient } = require('@prisma/client');
+const p = new PrismaClient();
+p.user.count().then(n => { console.log(n); p.\$disconnect(); }).catch(() => { console.log(0); p.\$disconnect(); });
+")
+
+if [ "$USER_COUNT" = "0" ]; then
+  echo "[entrypoint] No users found — running seed..."
+  node dist/src/seed.js
+else
+  echo "[entrypoint] Users exist ($USER_COUNT) — skipping seed."
+fi
 
 # Run the server
 exec node dist/src/index.js

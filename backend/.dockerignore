@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.env
+*.md
+uploads
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+src/**/*.d.ts.map
+check-item.*
+prisma.config.js*
+prisma.config.d.ts*

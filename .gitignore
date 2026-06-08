@@ -41,3 +41,10 @@ pgdata/
 backend/uploads/
 jlc-sidecar/libs/basic-core-sdk.jar
 jlc-sidecar/libs/parts-business-sdk.jar
+
+# Claude Code local config (machine-specific)
+.claude/
+
+# Internal notes / reports
+RINGKASAN_SISTEM_IOTBOM.txt
+FINAL_PROGRESS_REPORT_*.txt

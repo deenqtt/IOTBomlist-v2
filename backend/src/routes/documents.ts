@@ -39,6 +39,18 @@ docs.post('/:id/documents/upload', requireRole('admin', 'super'), async (c) => {
   }
   const file: File = rawFile
 
+  const DOC_MAX_BYTES = 20 * 1024 * 1024 // 20MB
+  if (file.size > DOC_MAX_BYTES) return c.json({ error: 'File too large (max 20MB)' }, 413)
+
+  const ALLOWED_DOC_EXTS = ['.pdf', '.xlsx', '.xls', '.csv', '.png', '.jpg', '.jpeg', '.zip']
+  const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase()
+  if (!ALLOWED_DOC_EXTS.includes(fileExt)) {
+    return c.json({ error: `File type not allowed. Allowed: ${ALLOWED_DOC_EXTS.join(', ')}` }, 400)
+  }
+
+  const VALID_DOC_TYPES = ['pick-and-place', 'schematic', 'gerber', 'datasheet', 'other']
+  const safeType = VALID_DOC_TYPES.includes(type) ? type : 'other'
+
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
   const productDir = join(UPLOADS_DIR, String(productId))
   ensureDir(productDir)
@@ -53,7 +65,7 @@ docs.post('/:id/documents/upload', requireRole('admin', 'super'), async (c) => {
   const doc = await prisma.document.create({
     data: {
       productId,
-      type,
+      type: safeType,
       storageKind: 'local',
       pathOrUrl: relativePath,
       uploadedBy: user.username,

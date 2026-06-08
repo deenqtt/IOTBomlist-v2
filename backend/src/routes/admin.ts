@@ -6,7 +6,13 @@ import { logChange } from '../lib/changelog.js'
 import { generateBackupBuffer } from '../lib/backup.js'
 import * as XLSX from 'xlsx'
 import { readdirSync, existsSync, readFileSync } from 'fs'
-import { join } from 'path'
+import { join, resolve } from 'path'
+
+const VALID_ROLES = ['user', 'admin', 'super'] as const
+type Role = typeof VALID_ROLES[number]
+
+const BACKUP_AUTO_DIR = resolve(process.cwd(), 'backups', 'auto')
+const UPLOAD_MAX_BYTES = 50 * 1024 * 1024 // 50MB for Excel imports
 import axios from 'axios'
 
 const admin = new Hono<{ Variables: { user: AuthUser } }>()
@@ -26,6 +32,7 @@ admin.post('/users', requireRole('super'), async (c) => {
   const { username, password, role = 'user' } = await c.req.json()
   const operator = c.get('user')
   if (!username?.trim() || !password) return c.json({ error: 'username and password required' }, 400)
+  if (!VALID_ROLES.includes(role as Role)) return c.json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` }, 400)
   const exists = await prisma.user.findUnique({ where: { username: username.trim() } })
   if (exists) return c.json({ error: 'Username already exists' }, 409)
   const passwordHash = await hashPassword(password)
@@ -56,7 +63,10 @@ admin.patch('/users/:id', requireRole('super'), async (c) => {
   if (!oldUser) return c.json({ error: 'Not found' }, 404)
 
   const data: Record<string, string> = {}
-  if (role) data.role = role
+  if (role) {
+    if (!VALID_ROLES.includes(role as Role)) return c.json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` }, 400)
+    data.role = role
+  }
   if (password) data.passwordHash = await hashPassword(password)
   if (!Object.keys(data).length) return c.json({ error: 'Nothing to update' }, 400)
   const user = await prisma.user.update({
@@ -238,6 +248,9 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
   const file = body['file'] as File
   const user = c.get('user')
   if (!file) return c.json({ error: 'file required' }, 400)
+  if (file.size > UPLOAD_MAX_BYTES) return c.json({ error: 'File too large (max 50MB)' }, 413)
+  const allowedTypes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'application/octet-stream']
+  if (file.name && !file.name.match(/\.(xlsx|xls)$/i)) return c.json({ error: 'Only .xlsx and .xls files are accepted' }, 400)
 
   // Get current auth token to pass to internal API calls
   const authHeader = c.req.header('Authorization')
@@ -888,11 +901,16 @@ admin.get('/backups/auto', requireRole('admin', 'super'), async (c) => {
 
 admin.get('/backups/auto/:filename', requireRole('admin', 'super'), async (c) => {
   const filename = c.req.param('filename')
-  const path = join(process.cwd(), 'backups', 'auto', filename)
-  if (!existsSync(path)) return c.json({ error: 'Not found' }, 404)
-  const buf = readFileSync(path)
+  // Prevent path traversal — resolve and verify path is within backup dir
+  const safePath = resolve(BACKUP_AUTO_DIR, filename)
+  if (!safePath.startsWith(BACKUP_AUTO_DIR + '/') && safePath !== BACKUP_AUTO_DIR) {
+    return c.json({ error: 'Invalid filename' }, 400)
+  }
+  if (!safePath.endsWith('.xlsx')) return c.json({ error: 'Invalid file type' }, 400)
+  if (!existsSync(safePath)) return c.json({ error: 'Not found' }, 404)
+  const buf = readFileSync(safePath)
   c.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-  c.header('Content-Disposition', `attachment; filename="${filename}"`)
+  c.header('Content-Disposition', `attachment; filename="${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}"`)
   return c.body(buf)
 })
 

@@ -3,3 +3,10 @@ node_modules
 .env
 
 /generated/prisma
+
+# compiled TypeScript artifacts (generated — do not commit)
+dist/
+**/*.js
+**/*.js.map
+**/*.d.ts
+**/*.d.ts.map

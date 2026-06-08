@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import {
   readFileSync,
@@ -20,7 +19,7 @@ products.use("*", authMiddleware);
 products.get("/", async (c) => {
   const q = c.req.query("q");
   const skip = Number(c.req.query("skip") || 0);
-  const limit = Number(c.req.query("limit") || 200);
+  const limit = Math.min(500, Math.max(1, Number(c.req.query("limit") || 200)));
 
   const where = q
     ? { name: { contains: q, mode: "insensitive" as const } }
@@ -47,7 +46,7 @@ products.get("/bom-rows", async (c) => {
     : undefined;
   const q = c.req.query("q");
   const skip = Number(c.req.query("skip") || 0);
-  const limit = Number(c.req.query("limit") || 200);
+  const limit = Math.min(500, Math.max(1, Number(c.req.query("limit") || 200)));
 
   const where = {
     AND: [
