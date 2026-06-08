@@ -82,21 +82,11 @@ docker compose up --build -d
 
 1. Server with Docker installed (Docker Compose plugin v2+)
 2. GitHub Personal Access Token with `read:packages` scope
-3. GitHub repository secret `NEXT_PUBLIC_API_URL` set to `http://YOUR_SERVER_IP:8082`
-4. `.env` file with production credentials (see `.env.example`)
+3. `.env` file with production credentials (see `.env.example`)
 
 ### First-time Setup
 
-**1. Set GitHub secret `NEXT_PUBLIC_API_URL`**
-
-Go to: GitHub repo → Settings → Secrets and variables → Actions → New repository secret
-
-```
-Name:  NEXT_PUBLIC_API_URL
-Value: http://192.168.2.160:8082
-```
-
-**2. SCP files to server**
+**1. SCP files to server**
 
 ```bash
 # From your local machine (project root)

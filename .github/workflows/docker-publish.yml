@@ -90,8 +90,6 @@ jobs:
         with:
           context: ./frontend
           push: true
-          build-args: |
-            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
           tags: |
             ${{ env.REGISTRY }}/${{ needs.set-env.outputs.owner_lc }}/iotbomlist-v2-frontend:latest
             ${{ env.REGISTRY }}/${{ needs.set-env.outputs.owner_lc }}/iotbomlist-v2-frontend:${{ needs.set-env.outputs.sha_short }}
