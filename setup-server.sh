@@ -284,7 +284,7 @@ http {
         }
 
         # API routes: Bearer token present = API call → backend, else = page nav → frontend
-        location ~ ^/(products|items|analytics|documents|lcsc|mouser|digikey)(/|$) {
+        location ~ ^/(products|items|analytics|documents|lcsc|mouser|digikey|sets|supersets|costing|uploads)(/|$) {
             proxy_pass http://$api_upstream;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
