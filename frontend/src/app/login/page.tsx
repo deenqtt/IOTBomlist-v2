@@ -2,24 +2,46 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTheme } from 'next-themes'
+import { Eye, EyeOff, Layers, ShieldCheck, Cpu } from 'lucide-react'
 import api from '@/lib/api'
 import { setToken } from '@/lib/auth'
+import { cn } from '@/lib/utils'
+
+const features = [
+  {
+    icon: Layers,
+    title: 'Real-time Inventory',
+    desc: 'Manage components, stock levels, and supplier pricing all in one place.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Secure & Reliable',
+    desc: 'Enterprise-grade security to protect your BOM data and company assets.',
+  },
+  {
+    icon: Cpu,
+    title: 'Multi-supplier Lookup',
+    desc: 'Direct integration with LCSC, Mouser, and DigiKey in real-time.',
+  },
+]
 
 export default function LoginPage() {
   const router = useRouter()
-  const [mounted, setMounted]     = useState(false)
-  const [username, setUsername]   = useState('')
-  const [password, setPassword]   = useState('')
-  const [showPass, setShowPass]   = useState(false)
-  const [error, setError]         = useState('')
-  const [loading, setLoading]     = useState(false)
-  const [tick, setTick]           = useState(0)
+  const { resolvedTheme } = useTheme()
+  const [mounted, setMounted]   = useState(false)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPass, setShowPass] = useState(false)
+  const [error, setError]       = useState('')
+  const [loading, setLoading]   = useState(false)
 
-  useEffect(() => {
-    setMounted(true)
-    const t = setInterval(() => setTick(n => n + 1), 550)
-    return () => clearInterval(t)
-  }, [])
+  useEffect(() => { setMounted(true) }, [])
+
+  const iconSrc = !mounted ? '/icon/icon_dark.svg'
+    : resolvedTheme === 'dark' ? '/icon/icon_light.svg' : '/icon/icon_dark.svg'
+
+  const isDark = mounted && resolvedTheme === 'dark'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -30,349 +52,239 @@ export default function LoginPage() {
       setToken(res.data.token)
       router.push('/items')
     } catch {
-      setError('Username atau password salah')
+      setError('Invalid username or password')
     } finally {
       setLoading(false)
     }
   }
 
-  const blink = tick % 2 === 0
-
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: '#04080f',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
-      position: 'relative',
-      overflow: 'hidden',
-    }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
-
-        * { box-sizing: border-box; }
-
-        @keyframes scanline {
-          0%   { transform: translateY(-100vh); opacity: 0; }
-          5%   { opacity: 1; }
-          95%  { opacity: 1; }
-          100% { transform: translateY(100vh); opacity: 0; }
-        }
-
-        @keyframes card-in {
-          from { opacity: 0; transform: translateY(16px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-
-        @keyframes pulse-dot {
-          0%, 100% { box-shadow: 0 0 3px #00ff41, 0 0 6px #00ff41; opacity: 1; }
-          50%       { box-shadow: 0 0 8px #00ff41, 0 0 16px #00ff41; opacity: 0.7; }
-        }
-
-        @keyframes grid-fade {
-          from { opacity: 0; }
-          to   { opacity: 1; }
-        }
-
-        .login-input {
-          width: 100%;
-          background: #020508;
-          border: 1px solid #00d4ff22;
-          color: #00d4ff;
-          font-family: "JetBrains Mono", monospace;
-          font-size: 13px;
-          padding: 10px 14px;
-          outline: none;
-          transition: border-color 0.12s, box-shadow 0.12s;
-          caret-color: #00d4ff;
-          letter-spacing: 0.02em;
-        }
-        .login-input:focus {
-          border-color: #00d4ff;
-          box-shadow: 0 0 0 1px #00d4ff, inset 0 0 24px #00d4ff06;
-        }
-        .login-input::placeholder { color: #00d4ff22; }
-
-        .login-btn {
-          width: 100%;
-          background: transparent;
-          border: 1px solid #00d4ff;
-          color: #00d4ff;
-          font-family: "JetBrains Mono", monospace;
-          font-size: 12px;
-          font-weight: 700;
-          letter-spacing: 0.18em;
-          padding: 12px;
-          cursor: pointer;
-          transition: background 0.12s, box-shadow 0.12s;
-          text-transform: uppercase;
-          position: relative;
-        }
-        .login-btn:hover:not(:disabled) {
-          background: #00d4ff10;
-          box-shadow: 0 0 20px #00d4ff28;
-        }
-        .login-btn:active:not(:disabled) { background: #00d4ff18; }
-        .login-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-
-        .show-btn {
-          position: absolute;
-          right: 12px;
-          top: 50%;
-          transform: translateY(-50%);
-          background: none;
-          border: none;
-          color: #00d4ff35;
-          cursor: pointer;
-          font-family: "JetBrains Mono", monospace;
-          font-size: 11px;
-          padding: 0;
-          transition: color 0.12s;
-          letter-spacing: 0;
-          line-height: 1;
-        }
-        .show-btn:hover { color: #00d4ff80; }
-      `}</style>
-
-      {/* Grid background */}
-      <div style={{
-        position: 'absolute',
-        inset: 0,
-        backgroundImage: `
-          linear-gradient(#00d4ff07 1px, transparent 1px),
-          linear-gradient(90deg, #00d4ff07 1px, transparent 1px)
-        `,
-        backgroundSize: '44px 44px',
-        animation: 'grid-fade 1.2s ease forwards',
-        pointerEvents: 'none',
-      }} />
-
-      {/* Radial vignette */}
-      <div style={{
-        position: 'absolute',
-        inset: 0,
-        background: 'radial-gradient(ellipse 80% 70% at 50% 50%, transparent 30%, #04080f 100%)',
-        pointerEvents: 'none',
-      }} />
-
-      {/* Scanline */}
-      <div style={{
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        height: '3px',
-        background: 'linear-gradient(transparent, #00d4ff06, transparent)',
-        animation: 'scanline 12s linear infinite',
-        pointerEvents: 'none',
-      }} />
-
-      {/* Corner labels */}
-      <span style={{ position: 'absolute', top: 20, left: 20, color: '#00d4ff18', fontSize: 10, letterSpacing: '0.1em' }}>
-        IOTBOM.SYS v2.0
-      </span>
-      <span style={{ position: 'absolute', top: 20, right: 20, color: '#00d4ff18', fontSize: 10, letterSpacing: '0.1em' }}>
-        {mounted ? new Date().toISOString().slice(0, 10) : '----/--/--'}
-      </span>
-      <span style={{ position: 'absolute', bottom: 20, left: 20, color: '#00d4ff12', fontSize: 10, letterSpacing: '0.1em' }}>
-        0x{mounted ? Math.floor(Date.now() / 1000).toString(16).toUpperCase() : '--------'}
-      </span>
-      <span style={{ position: 'absolute', bottom: 20, right: 20, color: '#00d4ff12', fontSize: 10, letterSpacing: '0.1em' }}>
-        GSPETECH © 2026
-      </span>
-
-      {/* Card */}
-      <div style={{
-        width: '100%',
-        maxWidth: 380,
-        margin: '0 16px',
-        animation: mounted ? 'card-in 0.45s cubic-bezier(0.22,1,0.36,1) forwards' : 'none',
-        opacity: mounted ? undefined : 0,
-      }}>
-        <div style={{
-          background: '#060c1a',
-          border: '1px solid #00d4ff20',
-          position: 'relative',
-        }}>
-          {/* Corner brackets */}
-          <span style={{ position: 'absolute', top: -1, left: -1, color: '#00d4ff60', fontSize: 14, lineHeight: 1 }}>┌</span>
-          <span style={{ position: 'absolute', top: -1, right: -1, color: '#00d4ff60', fontSize: 14, lineHeight: 1 }}>┐</span>
-          <span style={{ position: 'absolute', bottom: -1, left: -1, color: '#00d4ff60', fontSize: 14, lineHeight: 1 }}>└</span>
-          <span style={{ position: 'absolute', bottom: -1, right: -1, color: '#00d4ff60', fontSize: 14, lineHeight: 1 }}>┘</span>
-
-          {/* Status bar */}
-          <div style={{
-            borderBottom: '1px solid #00d4ff15',
-            padding: '9px 16px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}>
-            <span style={{ color: '#00d4ff35', fontSize: 10, letterSpacing: '0.12em' }}>
-              ── SYS.AUTH.MODULE ──────────────
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <div style={{
-                width: 5,
-                height: 5,
-                borderRadius: '50%',
-                background: '#00ff41',
-                animation: 'pulse-dot 2s ease-in-out infinite',
-              }} />
-              <span style={{ color: '#00ff41', fontSize: 9, letterSpacing: '0.15em' }}>ONLINE</span>
+    <div className="min-h-screen flex">
+      {/* ── Left: Form ───────────────────────────── */}
+      <div className={cn(
+        'flex flex-col justify-center w-full lg:w-[44%] px-8 sm:px-12 lg:px-16',
+        'bg-white dark:bg-[#0f1621]',
+      )}>
+        <div className="w-full max-w-[360px] mx-auto">
+          {/* Brand */}
+          <div className="flex items-center gap-3 mb-10">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={iconSrc}
+              alt="IOT BOM List"
+              width={38}
+              height={38}
+              draggable={false}
+              className="select-none rounded-xl"
+            />
+            <div>
+              <p className="text-[15px] font-bold tracking-tight text-gray-900 dark:text-gray-50 leading-tight">
+                IOT BOM List
+              </p>
+              <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                Bill of Materials Management
+              </p>
             </div>
           </div>
 
-          {/* Body */}
-          <div style={{ padding: '28px 24px 24px' }}>
-            {/* Brand */}
-            <div style={{ textAlign: 'center', marginBottom: 28 }}>
-              <div style={{
-                fontSize: 26,
-                fontWeight: 700,
-                letterSpacing: '0.06em',
-                color: '#00d4ff',
-                lineHeight: 1,
-                marginBottom: 6,
-              }}>
-                IOT<span style={{ color: '#00d4ff40' }}>.</span>BOM
-              </div>
-              <div style={{ color: '#00d4ff30', fontSize: 9, letterSpacing: '0.25em' }}>
-                INVENTORY MANAGEMENT SYSTEM
-              </div>
-            </div>
+          {/* Heading */}
+          <div className="mb-7">
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-50">
+              Welcome back
+            </h1>
+            <p className="text-[13px] text-gray-500 dark:text-gray-400 mt-1.5">
+              Please enter your credentials to access the system
+            </p>
+          </div>
 
-            {/* Divider */}
-            <div style={{
-              borderTop: '1px solid #00d4ff12',
-              marginBottom: 22,
-              position: 'relative',
-              textAlign: 'center',
-            }}>
-              <span style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                background: '#060c1a',
-                padding: '0 10px',
-                color: '#00d4ff30',
-                fontSize: 9,
-                letterSpacing: '0.2em',
-              }}>
-                AUTHENTICATION REQUIRED
-              </span>
-            </div>
-
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {/* Username */}
-              <div>
-                <label style={{
-                  display: 'block',
-                  color: '#00d4ff50',
-                  fontSize: 9,
-                  letterSpacing: '0.18em',
-                  marginBottom: 5,
-                }}>
-                  {'>'} IDENTIFIER
-                </label>
-                <input
-                  className="login-input"
-                  type="text"
-                  value={username}
-                  onChange={e => setUsername(e.target.value)}
-                  autoComplete="username"
-                  placeholder="username"
-                  required
-                />
-              </div>
-
-              {/* Password */}
-              <div>
-                <label style={{
-                  display: 'block',
-                  color: '#00d4ff50',
-                  fontSize: 9,
-                  letterSpacing: '0.18em',
-                  marginBottom: 5,
-                }}>
-                  {'>'} ACCESS KEY
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    className="login-input"
-                    type={showPass ? 'text' : 'password'}
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    autoComplete="current-password"
-                    placeholder="••••••••"
-                    required
-                    style={{ paddingRight: 48 }}
-                  />
-                  <button
-                    type="button"
-                    className="show-btn"
-                    onClick={() => setShowPass(v => !v)}
-                    aria-label={showPass ? 'Hide password' : 'Show password'}
-                  >
-                    {showPass ? '[●]' : '[○]'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Error */}
-              {error && (
-                <div style={{
-                  background: '#ff630008',
-                  border: '1px solid #ff630035',
-                  padding: '8px 12px',
-                }}>
-                  <span style={{
-                    color: '#ff7a35',
-                    fontSize: 10,
-                    letterSpacing: '0.06em',
-                  }}>
-                    {`[ERR_401] ${error}`}
-                  </span>
-                </div>
-              )}
-
-              {/* Submit */}
-              <button
-                className="login-btn"
-                type="submit"
-                disabled={loading}
-                style={{ marginTop: 4 }}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Username */}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="username"
+                className="text-[13px] font-medium text-gray-700 dark:text-gray-300"
               >
-                {loading
-                  ? `◌ VERIFYING${blink ? '_' : ' '}`
-                  : '◈  AUTHENTICATE'}
-              </button>
-            </form>
+                Username
+              </label>
+              <input
+                id="username"
+                type="text"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                autoComplete="username"
+                placeholder="Enter your username"
+                required
+                className={cn(
+                  'w-full px-3.5 py-2.5 rounded-lg text-[13px]',
+                  'bg-gray-50 dark:bg-[#161e2d]',
+                  'border border-gray-200 dark:border-[#253047]',
+                  'text-gray-900 dark:text-gray-100',
+                  'placeholder:text-gray-400 dark:placeholder:text-gray-600',
+                  'transition-[border-color,box-shadow] duration-150',
+                  'focus:outline-none focus:border-blue-500 dark:focus:border-blue-400',
+                  'focus:ring-2 focus:ring-blue-500/15 dark:focus:ring-blue-400/20',
+                )}
+              />
+            </div>
+
+            {/* Password */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="password"
+                  className="text-[13px] font-medium text-gray-700 dark:text-gray-300"
+                >
+                  Password
+                </label>
+                <span className="text-[12px] text-blue-500 dark:text-blue-400 cursor-default select-none">
+                  Forgot password?
+                </span>
+              </div>
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPass ? 'text' : 'password'}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
+                  required
+                  className={cn(
+                    'w-full pl-3.5 pr-10 py-2.5 rounded-lg text-[13px]',
+                    'bg-gray-50 dark:bg-[#161e2d]',
+                    'border border-gray-200 dark:border-[#253047]',
+                    'text-gray-900 dark:text-gray-100',
+                    'placeholder:text-gray-400 dark:placeholder:text-gray-600',
+                    'transition-[border-color,box-shadow] duration-150',
+                    'focus:outline-none focus:border-blue-500 dark:focus:border-blue-400',
+                    'focus:ring-2 focus:ring-blue-500/15 dark:focus:ring-blue-400/20',
+                  )}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPass(v => !v)}
+                  aria-label={showPass ? 'Hide password' : 'Show password'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                >
+                  {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Remember me */}
+            <div className="flex items-center gap-2.5">
+              <input
+                id="remember"
+                type="checkbox"
+                className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 accent-blue-500"
+              />
+              <label htmlFor="remember" className="text-[13px] text-gray-600 dark:text-gray-400 select-none cursor-pointer">
+                Remember me
+              </label>
+            </div>
+
+            {/* Error */}
+            {error && (
+              <div className="px-3.5 py-2.5 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50">
+                <p className="text-[12px] text-red-600 dark:text-red-400 font-medium">{error}</p>
+              </div>
+            )}
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={loading}
+              className={cn(
+                'w-full py-2.5 px-4 mt-1 rounded-lg text-[13px] font-semibold text-white',
+                'flex items-center justify-center gap-2',
+                'disabled:opacity-60 disabled:cursor-not-allowed',
+                'active:scale-[0.98] transition-[transform,opacity] duration-150',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2',
+              )}
+              style={{
+                background: isDark
+                  ? 'linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)'
+                  : 'linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%)',
+                boxShadow: '0 2px 12px rgba(37,99,235,0.35)',
+              }}
+            >
+              {loading ? 'Signing in...' : (
+                <>
+                  Sign In
+                  <span className="text-blue-200">→</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Footer */}
+          <p className="text-center text-[12px] text-gray-400 dark:text-gray-600 mt-8">
+            Don&apos;t have an account?{' '}
+            <span className="text-blue-500 dark:text-blue-400 cursor-default">Contact admin</span>
+          </p>
+        </div>
+      </div>
+
+      {/* ── Right: Marketing panel ────────────────── */}
+      <div
+        className="hidden lg:flex flex-col justify-between flex-1 p-14"
+        style={{
+          background: 'linear-gradient(145deg, #0a1628 0%, #102a4c 45%, #0d3557 100%)',
+        }}
+      >
+        {/* Top: Headline */}
+        <div>
+          <div className="mb-12">
+            <h2 className="text-3xl font-bold text-white leading-tight mb-4">
+              Streamline Your<br />
+              <span style={{ color: '#60a5fa' }}>IoT Material Management</span>
+            </h2>
+            <p className="text-[14px] text-blue-200/60 leading-relaxed max-w-sm">
+              Manage BOM, component inventory, and production cost estimates
+              in one unified platform.
+            </p>
           </div>
 
-          {/* Footer bar */}
-          <div style={{
-            borderTop: '1px solid #00d4ff10',
-            padding: '8px 16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-          }}>
-            <span style={{ color: '#00d4ff18', fontSize: 9, letterSpacing: '0.1em' }}>TLS 1.3</span>
-            <span style={{ color: '#00d4ff18', fontSize: 9, letterSpacing: '0.1em' }}>AES-256 ■</span>
+          {/* Features */}
+          <div className="space-y-6">
+            {features.map(({ icon: Icon, title, desc }) => (
+              <div key={title} className="flex gap-4">
+                <div
+                  className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+                  style={{ background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.2)' }}
+                >
+                  <Icon size={16} style={{ color: '#60a5fa' }} />
+                </div>
+                <div>
+                  <p className="text-[14px] font-semibold text-white mb-0.5">{title}</p>
+                  <p className="text-[12px] text-blue-200/50 leading-relaxed">{desc}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Hint */}
-        <div style={{
-          textAlign: 'center',
-          marginTop: 14,
-          color: '#00d4ff18',
-          fontSize: 9,
-          letterSpacing: '0.2em',
-        }}>
-          AUTHORIZED PERSONNEL ONLY
+        {/* Bottom: Testimonial */}
+        <div
+          className="rounded-2xl p-5 mt-10"
+          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+        >
+          <p className="text-[13px] text-blue-100/70 italic leading-relaxed mb-4">
+            &ldquo;This platform has transformed how we manage hundreds of PCB
+            components — from sourcing to production cost estimation.&rdquo;
+          </p>
+          <div className="flex items-center gap-3">
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold text-white"
+              style={{ background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)' }}
+            >
+              HW
+            </div>
+            <div>
+              <p className="text-[12px] font-semibold text-white">Hardware Team</p>
+              <p className="text-[11px] text-blue-200/40">GSPE Technology</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
