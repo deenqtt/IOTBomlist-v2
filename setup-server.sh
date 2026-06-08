@@ -111,7 +111,7 @@ DIGIKEY_CLIENT_SECRET=${DIGIKEY_CLIENT_SECRET}
 NEXT_PUBLIC_API_URL=http://${SERVER_HOST}:8001
 
 # CORS
-ALLOWED_ORIGINS=http://${SERVER_HOST}:3000
+ALLOWED_ORIGINS=http://${SERVER_HOST}:8080
 EOF
 chmod 600 .env
 success ".env production dibuat (permissions: 600)"
@@ -146,7 +146,7 @@ services:
       JLC_SECRET_KEY: ${JLC_SECRET_KEY}
       JLC_PORT: 8089
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8089/health || exit 1"]
+      test: ["CMD-SHELL", "nc -z localhost 8089 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -207,7 +207,7 @@ services:
       - frontend
       - backend
     ports:
-      - "80:80"
+      - "8080:80"
       - "8001:8001"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
@@ -304,7 +304,7 @@ echo ""
 echo "=================================================="
 success "Setup selesai!"
 echo ""
-echo "  Frontend : http://${SERVER_HOST}"
+echo "  Frontend : http://${SERVER_HOST}:8080"
 echo "  API      : http://${SERVER_HOST}:8001"
 echo ""
 warn "WAJIB: Ganti password default setelah login pertama!"
