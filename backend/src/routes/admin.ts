@@ -632,8 +632,11 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
 
         // Auto-fix partNumber: kalau sekarang C-code (e.g. "C114767") tapi LCSC return MPN asli → update
         const isCcode = (v: string) => /^C\d+$/i.test(v.trim())
-        const realMpn = found.mpn && found.mpn !== rawPn && isCcode(rawPn) && !isCcode(found.mpn) ? found.mpn : null
-        if (realMpn) console.log(`[Auto-Enrich] Updating partNumber: "${rawPn}" → "${realMpn}" (real MPN from LCSC)`)
+        const realMpn = found.mpn && !isCcode(found.mpn) && (
+          isCcode(rawPn) ||        // C-code replaced by real MPN
+          !rawPn?.trim()           // rawPn empty — fill from LCSC
+        ) ? found.mpn : null
+        if (realMpn) console.log(`[Auto-Enrich] Updating partNumber: "${rawPn || '(empty)'}" → "${realMpn}" (real MPN from LCSC)`)
 
         const supplierLabel = source === 'lcsc' ? 'LCSC' : source === 'mouser' ? 'Mouser' : source === 'digikey' ? 'DigiKey' : source
         console.log(`[Auto-Enrich] Updating Database for SID: ${sid} with fresh data from ${supplierLabel} (Stock: ${stockNum})`);
