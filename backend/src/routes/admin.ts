@@ -466,6 +466,7 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
       }
 
       // LCSC by C-code first (if available) regardless of order
+      let discoveredLcsc: string | null = lcsc || null
       if (lcsc) {
         console.log(`[Auto-Enrich] Querying LCSC by C-code: ${lcsc}`);
         const res = await api.post("/lcsc/lookup", { items: [{ lcsc, qty: 1 }] });
@@ -493,6 +494,7 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
               found = lookupRes.data?.items?.[0];
               if (found) {
                 source = 'lcsc';
+                discoveredLcsc = match.lcsc
                 console.log(`[Auto-Enrich]   LCSC lookup OK: mpn=${found.mpn} value=${found.value} voltageRating=${found.voltageRating} tolerance=${found.tolerance} package=${found.package} price=${found.price}`);
               }
             } else {
@@ -656,6 +658,8 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
               return parts.length ? parts.join(';') : undefined
             })(),
             supplierPrices: JSON.stringify(spMap),
+            // save discovered LCSC C-code so Price Sync can look it up later
+            ...(discoveredLcsc ? { stockCode: discoveredLcsc } : {}),
             // replace C-code with real MPN if found via LCSC
             ...(realMpn ? { partNumber: realMpn } : {}),
             // specs blob (DigiKey Parameters JSON)
