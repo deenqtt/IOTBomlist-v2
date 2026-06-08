@@ -272,8 +272,19 @@ http {
             proxy_set_header Host $host;
         }
 
+        # admin/import needs long timeout for file uploads
+        location ~ ^/admin(/|$) {
+            proxy_pass http://$api_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_read_timeout 300s;
+            proxy_send_timeout 300s;
+        }
+
         # API routes: Bearer token present = API call → backend, else = page nav → frontend
-        location ~ ^/(products|items|admin|documents|lcsc|mouser|digikey)(/|$) {
+        location ~ ^/(products|items|analytics|documents|lcsc|mouser|digikey)(/|$) {
             proxy_pass http://$api_upstream;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
