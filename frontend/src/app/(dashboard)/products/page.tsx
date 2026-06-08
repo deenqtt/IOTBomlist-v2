@@ -92,13 +92,19 @@ interface SupplierData {
   manufacturer?: string
   description?: string
   price?: number | null
+  moq?: number | null
+  priceBreaks?: any[] | null
   package?: string | null
   category?: string | null
   value?: string | null
+  voltageRating?: string | null
+  tolerance?: string | null
   source?: string
   url?: string | null
   datasheet?: string | null
+  availability?: string | null
   quantity_available?: number | null
+  specs?: string | null
 }
 
 // ─── Missing item state type ───────────────────────────────────────────────
@@ -106,8 +112,18 @@ interface SupplierData {
 interface MissingItemState {
   identifier: string
   qty: number
+  resolvedMpn?: string
+  lcscCode?: string
   status: 'pending' | 'searching' | 'found' | 'not_found' | 'resolved' | 'skipped'
   supplierData?: SupplierData
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+function genStableId(mpn: string): string {
+  const slug = mpn.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 8)
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase()
+  return `${slug}-${rand}`
 }
 
 // ─── Missing Items Review Step ─────────────────────────────────────────────
@@ -286,53 +302,108 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
       setMissingItems(missing)
       setStep(3)
 
-      // Priority: LCSC by C-code → Mouser by resolvedMpn → Mouser by identifier
+      const detectSupplier = (url: string): "lcsc" | "mouser" | "digikey" | null => {
+        const u = url.toLowerCase();
+        if (u.includes("lcsc") || u.includes("jlcpcb") || /_C\d+\.html/i.test(u)) return "lcsc";
+        if (u.includes("mouser")) return "mouser";
+        if (u.includes("digikey")) return "digikey";
+        return null;
+      };
+
+      // Auto-search suppliers for each missing item
       for (const item of result.notFound) {
+        const targetSupplier = detectSupplier(item.url || "");
+        
         try {
           let found = null
           let source = 'mouser'
 
-          if (item.lcscCode) {
-            const res = await api.post('/lcsc/lookup', { items: [{ lcsc: item.lcscCode, qty: item.qty }] })
-            found = res.data?.items?.[0]
-            source = 'lcsc'
+          const searchPn = item.resolvedMpn || item.identifier;
+
+          // Helper for LCSC Deep Lookup
+          const doLcscLookup = async (code: string) => {
+            const res = await api.post("/lcsc/lookup", { items: [{ lcsc: code, qty: item.qty }] });
+            return res.data?.items?.[0];
+          };
+
+          // 1. Targeted Search
+          if (targetSupplier === "lcsc" || item.lcscCode) {
+            const code = item.lcscCode || (item.url ? (item.url.match(/_(C\d+)\.html/i)?.[1]) : null);
+            if (code) {
+              found = await doLcscLookup(code);
+              if (found) source = "lcsc";
+            }
+            
+            if (!found) {
+              const res = await api.post("/lcsc/search", { keyword: searchPn, limit: 5 });
+              const lcscMatch = res.data?.items?.find((r: any) => r.mpn?.toLowerCase() === searchPn.toLowerCase()) || res.data?.items?.[0];
+              if (lcscMatch?.lcsc) {
+                found = await doLcscLookup(lcscMatch.lcsc);
+                if (found) source = "lcsc";
+              }
+            }
+          } 
+          else if (targetSupplier === "mouser") {
+            const res = await api.post("/mouser/search", { keyword: searchPn, qty: item.qty });
+            found = res.data?.items?.[0];
+            if (found) source = "mouser";
+          } 
+          else if (targetSupplier === "digikey") {
+            const res = await api.post("/digikey/search", { keyword: searchPn, qty: item.qty });
+            found = res.data?.items?.[0];
+            if (found) source = "digikey";
           }
 
+          // 2. Fallback
           if (!found) {
-            const searchPn = item.resolvedMpn || item.identifier
-            // Use 'keyword' instead of 'pn' to allow smart fallback search in backend
-            const res = await api.post('/mouser/search', { keyword: searchPn, qty: item.qty })
-            found = res.data?.items?.[0]
-            source = 'mouser'
-          }
-
-          if (!found) {
-            // Try DigiKey as third fallback
-            const searchPn = item.resolvedMpn || item.identifier
-            const res = await api.post('/digikey/search', { keyword: searchPn, qty: item.qty })
-            found = res.data?.items?.[0]
-            source = 'digikey'
+            // LCSC
+            if (!found) {
+              const res = await api.post("/lcsc/search", { keyword: searchPn, limit: 5 });
+              const lcscMatch = res.data?.items?.[0];
+              if (lcscMatch?.lcsc) {
+                found = await doLcscLookup(lcscMatch.lcsc);
+                if (found) source = "lcsc";
+              }
+            }
+            // Mouser
+            if (!found) {
+              const res = await api.post("/mouser/search", { keyword: searchPn, qty: item.qty });
+              found = res.data?.items?.[0];
+              if (found) source = "mouser";
+            }
+            // DigiKey
+            if (!found) {
+              const res = await api.post("/digikey/search", { keyword: searchPn, qty: item.qty });
+              found = res.data?.items?.[0];
+              if (found) source = "digikey";
+            }
           }
 
           if (found) {
             setMissingItems(prev => prev.map(m =>
               m.identifier === item.identifier
-                ? { 
-                    ...m, 
-                    status: 'found', 
-                    supplierData: { 
-                      mpn: found.mpn, 
-                      manufacturer: found.manufacturer, 
-                      description: found.description, 
-                      price: found.price, 
-                      package: found.package, 
-                      category: found.category, 
-                      value: found.value, 
+                ? {
+                    ...m,
+                    status: 'found',
+                    supplierData: {
+                      mpn: found.mpn,
+                      manufacturer: found.manufacturer,
+                      description: found.description,
+                      price: found.price,
+                      moq: found.moq,
+                      priceBreaks: found.priceBreaks,
+                      package: found.package,
+                      category: found.category,
+                      value: found.value,
+                      voltageRating: found.voltageRating,
+                      tolerance: found.tolerance,
                       source,
                       url: found.url,
                       datasheet: found.datasheet,
-                      quantity_available: found.quantity_available
-                    } 
+                      availability: found.availability,
+                      quantity_available: found.quantity_available,
+                      specs: found.specs ?? null,
+                    }
                   }
                 : m
             ))
@@ -350,17 +421,45 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
 
   async function addItemToDb(item: MissingItemState): Promise<string | null> {
     if (!item.supplierData) return null
+
+    const pn = item.supplierData.mpn || item.identifier
+
+    // Declared outside try so catch block can access for 409 patch
+    let enrichedSpecs: { specs?: string | null; value?: string | null; voltageRating?: string | null; tolerance?: string | null; package?: string | null } = {
+      specs: item.supplierData.specs,
+      value: item.supplierData.value,
+      voltageRating: item.supplierData.voltageRating,
+      tolerance: item.supplierData.tolerance,
+      package: item.supplierData.package,
+    }
+    if (!item.supplierData.specs && item.supplierData.source !== 'digikey' && pn) {
+      try {
+        const dkRes = await api.post('/digikey/specs', { mpn: pn })
+        if (dkRes.data?.specs) {
+          enrichedSpecs = {
+            specs: dkRes.data.specs,
+            value: dkRes.data.value || item.supplierData.value,
+            voltageRating: dkRes.data.voltageRating || item.supplierData.voltageRating,
+            tolerance: dkRes.data.tolerance || item.supplierData.tolerance,
+            package: dkRes.data.package || item.supplierData.package,
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
     try {
-      const pn = item.supplierData.mpn || item.identifier
-      const stableId = pn.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `item-${Date.now()}`
-      
+      const stableId = genStableId(pn)
+
       const spMap: SupplierPricesMap = {};
       if (item.supplierData.source) {
         const src = item.supplierData.source as keyof SupplierPricesMap;
         spMap[src] = {
           pn: (src === 'lcsc' ? ((item as MissingItemState & { lcscCode?: string }).lcscCode || pn) : pn),
           price: item.supplierData.price || null,
+          moq: item.supplierData.moq || null,
+          priceBreaks: item.supplierData.priceBreaks || null,
           url: item.supplierData.url || null,
+          availability: item.supplierData.availability || null,
           quantity_available: item.supplierData.quantity_available ?? null,
         };
       }
@@ -370,12 +469,15 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
         partNumber: pn,
         productName: item.supplierData.description || pn,
         manufacturer: item.supplierData.manufacturer,
-        value: item.supplierData.value,
-        package: item.supplierData.package,
+        value: enrichedSpecs.value,
+        voltageRating: enrichedSpecs.voltageRating,
+        tolerance: enrichedSpecs.tolerance,
+        package: enrichedSpecs.package,
+        specs: enrichedSpecs.specs,
         category: item.supplierData.category,
         priceMin: item.supplierData.price,
         priceCurrency: 'USD',
-        suppliers: item.supplierData.source,
+        suppliers: item.supplierData.source === 'lcsc' ? 'LCSC' : (item.supplierData.source === 'mouser' ? 'Mouser' : (item.supplierData.source === 'digikey' ? 'DigiKey' : item.supplierData.source)),
         links: item.supplierData.datasheet || item.supplierData.url || null,
         supplierPrices: Object.keys(spMap).length ? JSON.stringify(spMap) : undefined,
       })
@@ -384,7 +486,21 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
       const err = e as { response?: { status?: number; data?: { stableId?: string; existing?: { stableId?: string } } } }
       if (err.response?.status === 409) {
         const existingId = err.response.data?.stableId || err.response.data?.existing?.stableId
-        if (existingId) return existingId
+        if (existingId) {
+          // Patch enriched specs onto existing item if it has none
+          if (enrichedSpecs.specs || enrichedSpecs.voltageRating || enrichedSpecs.value || enrichedSpecs.package) {
+            try {
+              await api.patch(`/items/${existingId}`, {
+                ...(enrichedSpecs.specs ? { specs: enrichedSpecs.specs } : {}),
+                ...(enrichedSpecs.voltageRating ? { voltageRating: enrichedSpecs.voltageRating } : {}),
+                ...(enrichedSpecs.value ? { value: enrichedSpecs.value } : {}),
+                ...(enrichedSpecs.package ? { package: enrichedSpecs.package } : {}),
+                ...(enrichedSpecs.tolerance ? { tolerance: enrichedSpecs.tolerance } : {}),
+              })
+            } catch { /* non-fatal */ }
+          }
+          return existingId
+        }
       }
       return null
     }
@@ -851,9 +967,9 @@ export default function ProductsPage() {
                       {/* Cost Column */}
                       <td className="px-3 py-2.5 text-right">
                         {costsLoading || isFetchingCosts ? (
-                          <Skeleton className="h-4 w-16 ml-auto rounded opacity-50" />
+                          <div className="flex justify-end"><Loader2 size={14} className="animate-spin text-muted-foreground" /></div>
                         ) : costInfo ? (
-                          <div className="flex flex-col items-end">
+                          <div className="flex flex-col items-end gap-0.5">
                             <span className="font-mono text-[13px] font-bold text-foreground">
                               {costInfo.total > 0 ? (
                                 `USD ${fmt(costInfo.total, 'USD')}`
@@ -861,6 +977,12 @@ export default function ProductsPage() {
                                 <span className="text-muted-foreground/30">—</span>
                               )}
                             </span>
+                            {costInfo.altTotal > 0 && costInfo.altTotal < costInfo.total && (
+                              <span className="font-mono text-[10px] text-green-500 font-bold">
+                                Alt: USD {fmt(costInfo.altTotal, 'USD')}
+                                <span className="ml-1 opacity-70">({Math.round((1 - costInfo.altTotal / costInfo.total) * 100)}% cheaper)</span>
+                              </span>
+                            )}
                             {costInfo.missingPrices > 0 && (
                               <div className="flex items-center gap-1 text-[9px] font-black text-amber-600 bg-amber-500/10 px-1.5 rounded-full border border-amber-500/20 uppercase tracking-tighter">
                                 <AlertCircle size={8} /> {costInfo.missingPrices} missing

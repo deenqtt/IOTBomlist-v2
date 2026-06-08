@@ -11,9 +11,15 @@ const API_HOST = 'https://api.digikey.com'
 // Simple in-memory token cache
 let cachedToken: { token: string; expiresAt: number } | null = null
 
-function getCreds(): { clientId: string; clientSecret: string } {
-  const clientId = process.env.DIGIKEY_CLIENT_ID ?? ''
-  const clientSecret = process.env.DIGIKEY_CLIENT_SECRET ?? ''
+export function clearDigikeyTokenCache() { cachedToken = null }
+
+async function getCreds(): Promise<{ clientId: string; clientSecret: string }> {
+  const [idRow, secretRow] = await Promise.all([
+    prisma.systemSetting.findUnique({ where: { key: 'api_digikey_client_id' } }),
+    prisma.systemSetting.findUnique({ where: { key: 'api_digikey_client_secret' } }),
+  ])
+  const clientId = idRow?.value || process.env.DIGIKEY_CLIENT_ID || ''
+  const clientSecret = secretRow?.value || process.env.DIGIKEY_CLIENT_SECRET || ''
   if (!clientId || !clientSecret) throw new Error('DIGIKEY_CLIENT_ID / DIGIKEY_CLIENT_SECRET not configured')
   return { clientId, clientSecret }
 }
@@ -22,7 +28,7 @@ async function getToken(): Promise<string> {
   const now = Date.now() / 1000
   if (cachedToken && cachedToken.expiresAt > now + 30) return cachedToken.token
 
-  const { clientId, clientSecret } = getCreds()
+  const { clientId, clientSecret } = await getCreds()
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -92,10 +98,10 @@ const DK_VALUE_PARAMS   = [
   'current - hold (ih) (max)', 'current - trip (it)'
 ]
 const DK_VOLTAGE_PARAMS = [
-  'voltage - rated', 'voltage rating', 'voltage - input', 'voltage - output',
-  'voltage - collector emitter breakdown (max)', 'voltage - supply',
+  'voltage - rated', 'voltage rating', 'voltage range', 'voltage - input', 'voltage - output',
+  'voltage - collector emitter breakdown (max)', 'voltage - supply', 'voltage - supply (vcc/vdd)',
   'voltage - isolation', 'voltage - input (max)', 'voltage - output (min/fixed)', 'voltage - output (max)',
-  'voltage - max'
+  'voltage - max', 'supply voltage - max', 'operating supply voltage'
 ]
 const DK_TOLERANCE_PARAMS = ['resistance tolerance', 'capacitance tolerance', 'tolerance', 'frequency stability']
 const DK_PACKAGE_PARAMS   = ['package / case', 'supplier device package', 'case / package', 'mounting type']
@@ -118,9 +124,15 @@ function extractSpecsDk(params: { ParameterText: string; ValueText: string }[]) 
   for (const k of DK_PACKAGE_PARAMS) {
     const v = map.get(k); if (v && v !== '-') { pkg = v; break }
   }
-  const specs = { value, voltageRating, tolerance, package: pkg }
-  console.log(`[DigiKey Debug] Raw Params Map:`, Object.fromEntries(map))
-  console.log(`[DigiKey Debug] Extracted Specs from ${map.size} params:`, specs)
+  // All params as clean key-value for specs JSON blob
+  const allSpecs: Record<string, string> = {}
+  for (const p of params) {
+    if (p.ParameterText && p.ValueText && p.ValueText !== '-') {
+      allSpecs[p.ParameterText] = p.ValueText
+    }
+  }
+  const specs = { value, voltageRating, tolerance, package: pkg, allSpecs }
+  console.log(`[DigiKey Debug] Extracted Specs from ${map.size} params:`, { value, voltageRating, tolerance, package: pkg })
   return specs
 }
 
@@ -171,12 +183,16 @@ function summarize(product: Record<string, unknown>, qty = 1) {
     ? extractFromDescDk(description ?? '')
     : { value: null, voltageRating: null, tolerance: null, package: null }
 
-  const specs = {
+  const mergedSpecs = {
     value: structuredSpecs.value || fallbackSpecs.value,
     voltageRating: structuredSpecs.voltageRating || fallbackSpecs.voltageRating,
     tolerance: structuredSpecs.tolerance || fallbackSpecs.tolerance,
     package: structuredSpecs.package || fallbackSpecs.package,
   }
+
+  const specsJson = Object.keys(structuredSpecs.allSpecs).length
+    ? JSON.stringify(structuredSpecs.allSpecs)
+    : null
 
   return {
     mpn: product.ManufacturerProductNumber,
@@ -193,7 +209,8 @@ function summarize(product: Record<string, unknown>, qty = 1) {
     availability: status,
     quantity_available: product.QuantityAvailable,
     source: 'digikey',
-    ...specs,
+    specs: specsJson,
+    ...mergedSpecs,
   }
 }
 
@@ -203,7 +220,7 @@ digikey.post('/search', async (c) => {
   const { keyword, pn, qty = 1, limit = 10 } = await c.req.json()
   if (!keyword && !pn) return c.json({ error: 'keyword or pn required' }, 400)
 
-  const { clientId } = getCreds()
+  const { clientId } = await getCreds()
   const token = await getToken()
   const headers = makeHeaders(token, clientId)
 
@@ -227,6 +244,43 @@ digikey.post('/search', async (c) => {
   return c.json({
     items: products.slice(0, limit).map(p => summarize(p, qty)),
     total: products.length,
+  })
+})
+
+// POST /digikey/specs — fetch only specs JSON for a given MPN (for cross-supplier enrichment)
+// Body: { mpn: string }
+digikey.post('/specs', async (c) => {
+  const { mpn } = await c.req.json()
+  if (!mpn) return c.json({ error: 'mpn required' }, 400)
+
+  const { clientId } = await getCreds()
+  const token = await getToken()
+  const headers = makeHeaders(token, clientId)
+
+  const res = await fetch(`${API_HOST}/products/v4/search/${encodeURIComponent(String(mpn).trim())}/productdetails`, { headers })
+  if (!res.ok) return c.json({ specs: null })
+
+  const data = await res.json() as Record<string, unknown>
+  const product = data.Product as Record<string, unknown> | undefined
+  if (!product) return c.json({ specs: null })
+
+  const rawParams = (product.Parameters as { ParameterText: string; ValueText: string }[]) ?? []
+  const allSpecs: Record<string, string> = {}
+  for (const p of rawParams) {
+    if (p.ParameterText && p.ValueText && p.ValueText !== '-') {
+      allSpecs[p.ParameterText] = p.ValueText
+    }
+  }
+
+  // Also extract the 4 mapped fields
+  const extracted = extractSpecsDk(rawParams)
+
+  return c.json({
+    specs: Object.keys(allSpecs).length ? JSON.stringify(allSpecs) : null,
+    value: extracted.value ?? null,
+    voltageRating: extracted.voltageRating ?? null,
+    tolerance: extracted.tolerance ?? null,
+    package: extracted.package ?? null,
   })
 })
 

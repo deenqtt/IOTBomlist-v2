@@ -3,7 +3,7 @@ import prisma from '../lib/prisma.js'
 import { authMiddleware, requireRole, AuthUser } from '../middleware/auth.js'
 
 const costing = new Hono<{ Variables: { user: AuthUser } }>()
-costing.use('*', authMiddleware, requireRole('super'))
+costing.use('*', authMiddleware, requireRole('admin', 'super'))
 
 // USD base exchange rates (rough defaults, can be overridden client-side)
 const DEFAULT_RATES: Record<string, number> = {
@@ -20,13 +20,15 @@ const DEFAULT_RATES: Record<string, number> = {
   INR: 83.5,
 }
 
+type PriceItem = { priceMin: number | null; supplierPrices?: string | null }
+
 /**
  * Smart Price Resolver:
  * 1. Checks supplierPrices JSON for any supplier with stock > 0.
  * 2. If multiple have stock, picks the cheapest among them.
  * 3. Fallback: If no one has stock, uses the global priceMin.
  */
-function getEffectivePrice(item: { priceMin: number | null; supplierPrices?: string | null }): number | null {
+function getEffectivePrice(item: PriceItem): number | null {
   if (!item.supplierPrices) return item.priceMin
 
   try {
@@ -57,6 +59,28 @@ function getEffectivePrice(item: { priceMin: number | null; supplierPrices?: str
   return item.priceMin
 }
 
+/**
+ * Alt Price Resolver: min(item price, cheapest alternative price)
+ * altMap: stableId → PriceItem (pre-loaded batch)
+ */
+function getAltEffectivePrice(
+  item: PriceItem,
+  altIds: string[],
+  altMap: Map<string, PriceItem>
+): number | null {
+  const mainPrice = getEffectivePrice(item)
+  if (altIds.length === 0) return mainPrice
+
+  const altPrices = altIds
+    .map(id => altMap.get(id))
+    .filter((a): a is PriceItem => !!a)
+    .map(a => getEffectivePrice(a))
+    .filter((p): p is number => p !== null && p > 0)
+
+  const candidates = [mainPrice, ...altPrices].filter((p): p is number => p !== null && p > 0)
+  return candidates.length > 0 ? Math.min(...candidates) : mainPrice
+}
+
 // Cost per product: sum of (priceMin * quantitySum) for each BOM row
 costing.get('/products', async (c) => {
   const currency = c.req.query('currency') || 'USD'
@@ -70,25 +94,45 @@ costing.get('/products', async (c) => {
     include: {
       items: {
         include: {
-          item: { select: { stableId: true, priceMin: true, priceCurrency: true, supplierPrices: true } }
+          item: { select: { stableId: true, priceMin: true, priceCurrency: true, supplierPrices: true, alternatives: true } }
         }
       }
     }
   })
 
+  // Batch-load all alternative items
+  const allAltIds = new Set<string>()
+  for (const p of products)
+    for (const pi of p.items)
+      if (pi.item.alternatives) pi.item.alternatives.split(';').filter(Boolean).forEach(id => allAltIds.add(id.trim()))
+  const altItems = await prisma.item.findMany({
+    where: { stableId: { in: [...allAltIds] } },
+    select: { stableId: true, priceMin: true, priceCurrency: true, supplierPrices: true }
+  })
+  const altMap = new Map(altItems.map(a => [a.stableId, a]))
+
   const result = products.map(p => {
     let totalUSD = 0
+    let altTotalUSD = 0
     let missingPrices = 0
     for (const pi of p.items) {
       const qty = pi.quantitySum ?? 1
       const effectivePrice = getEffectivePrice(pi.item)
+      const altIds = pi.item.alternatives ? pi.item.alternatives.split(';').map(s => s.trim()).filter(Boolean) : []
+      const altPrice = getAltEffectivePrice(pi.item, altIds, altMap)
 
       if (!effectivePrice || effectivePrice <= 0) {
         missingPrices++
       } else {
-        // Normalize to USD first (all prices assumed to be in item.priceCurrency)
         const itemRate = DEFAULT_RATES[pi.item.priceCurrency ?? 'USD'] ?? 1
         totalUSD += (effectivePrice / itemRate) * qty
+      }
+      if (altPrice && altPrice > 0) {
+        const itemRate = DEFAULT_RATES[pi.item.priceCurrency ?? 'USD'] ?? 1
+        altTotalUSD += (altPrice / itemRate) * qty
+      } else if (effectivePrice && effectivePrice > 0) {
+        const itemRate = DEFAULT_RATES[pi.item.priceCurrency ?? 'USD'] ?? 1
+        altTotalUSD += (effectivePrice / itemRate) * qty
       }
     }
     return {
@@ -98,6 +142,8 @@ costing.get('/products', async (c) => {
       missingPrices,
       totalUSD,
       total: totalUSD * rate,
+      altTotalUSD,
+      altTotal: altTotalUSD * rate,
       currency,
     }
   })
@@ -129,18 +175,32 @@ costing.get('/sets', async (c) => {
   const allProducts = await prisma.product.findMany({
     include: {
       items: {
-        include: { item: { select: { priceMin: true, priceCurrency: true, supplierPrices: true } } }
+        include: { item: { select: { priceMin: true, priceCurrency: true, supplierPrices: true, alternatives: true } } }
       }
     }
   })
 
-  const productCostUSD = new Map<number, { cost: number; missing: number }>()
+  // Batch-load all alternative items for sets
+  const setsAltIds = new Set<string>()
+  for (const p of allProducts)
+    for (const pi of p.items)
+      if (pi.item.alternatives) pi.item.alternatives.split(';').filter(Boolean).forEach(id => setsAltIds.add(id.trim()))
+  const setsAltItems = await prisma.item.findMany({
+    where: { stableId: { in: [...setsAltIds] } },
+    select: { stableId: true, priceMin: true, priceCurrency: true, supplierPrices: true }
+  })
+  const setsAltMap = new Map(setsAltItems.map(a => [a.stableId, a]))
+
+  const productCostUSD = new Map<number, { cost: number; altCost: number; missing: number }>()
   for (const p of allProducts) {
     let cost = 0
+    let altCost = 0
     let missing = 0
     for (const pi of p.items) {
       const qty = pi.quantitySum ?? 1
       const effectivePrice = getEffectivePrice(pi.item)
+      const altIds = pi.item.alternatives ? pi.item.alternatives.split(';').map(s => s.trim()).filter(Boolean) : []
+      const altPrice = getAltEffectivePrice(pi.item, altIds, setsAltMap)
 
       if (!effectivePrice || effectivePrice <= 0) {
         missing++
@@ -148,8 +208,15 @@ costing.get('/sets', async (c) => {
         const itemRate = DEFAULT_RATES[pi.item.priceCurrency ?? 'USD'] ?? 1
         cost += (effectivePrice / itemRate) * qty
       }
+      if (altPrice && altPrice > 0) {
+        const itemRate = DEFAULT_RATES[pi.item.priceCurrency ?? 'USD'] ?? 1
+        altCost += (altPrice / itemRate) * qty
+      } else if (effectivePrice && effectivePrice > 0) {
+        const itemRate = DEFAULT_RATES[pi.item.priceCurrency ?? 'USD'] ?? 1
+        altCost += (effectivePrice / itemRate) * qty
+      }
     }
-    productCostUSD.set(p.id, { cost, missing })
+    productCostUSD.set(p.id, { cost, altCost, missing })
   }
 
   // We need ALL sets in memory for the recursive resolveSetCost if it depends on parents
@@ -172,14 +239,10 @@ costing.get('/sets', async (c) => {
       else productQtys.set(item.mainProductId, item.qty)
     }
 
-    let totalCost = 0
     let totalMissing = 0
-    for (const [pid, qty] of productQtys.entries()) {
+    for (const [pid] of productQtys.entries()) {
       const pc = productCostUSD.get(pid)
-      if (pc) {
-        totalCost += pc.cost * qty
-        totalMissing += pc.missing
-      }
+      if (pc) totalMissing += pc.missing
     }
 
     return { products: productQtys, missing: totalMissing }
@@ -188,9 +251,13 @@ costing.get('/sets', async (c) => {
   const result = await Promise.all(sets.map(async s => {
     const { products: productQtys, missing } = await resolveSetCost(s.id)
     let totalCostUSD = 0
+    let altTotalCostUSD = 0
     for (const [pid, qty] of productQtys.entries()) {
       const pc = productCostUSD.get(pid)
-      if (pc) totalCostUSD += pc.cost * qty
+      if (pc) {
+        totalCostUSD += pc.cost * qty
+        altTotalCostUSD += pc.altCost * qty
+      }
     }
     return {
       setId: s.id,
@@ -200,6 +267,8 @@ costing.get('/sets', async (c) => {
       missingPrices: missing,
       totalUSD: totalCostUSD,
       total: totalCostUSD * rate,
+      altTotalUSD: altTotalCostUSD,
+      altTotal: altTotalCostUSD * rate,
       currency,
     }
   }))
@@ -303,20 +372,34 @@ costing.get('/supersets', async (c) => {
   const allProducts = await prisma.product.findMany({
     include: {
       items: {
-        include: { item: { select: { stableId: true, partNumber: true, productName: true, priceMin: true, priceCurrency: true, supplierPrices: true } } }
+        include: { item: { select: { stableId: true, partNumber: true, productName: true, priceMin: true, priceCurrency: true, supplierPrices: true, alternatives: true } } }
       }
     }
   })
 
-  const productData = new Map<number, { cost: number; missing: number; itemUsage: Map<string, { qty: number, price: number, pn: string, name: string }> }>()
+  // Batch-load alternative items for supersets
+  const ssAltIds = new Set<string>()
+  for (const p of allProducts)
+    for (const pi of p.items)
+      if (pi.item.alternatives) pi.item.alternatives.split(';').filter(Boolean).forEach(id => ssAltIds.add(id.trim()))
+  const ssAltItems = await prisma.item.findMany({
+    where: { stableId: { in: [...ssAltIds] } },
+    select: { stableId: true, priceMin: true, priceCurrency: true, supplierPrices: true }
+  })
+  const ssAltMap = new Map(ssAltItems.map(a => [a.stableId, a]))
+
+  const productData = new Map<number, { cost: number; altCost: number; missing: number; itemUsage: Map<string, { qty: number, price: number, pn: string, name: string }> }>()
   for (const p of allProducts) {
     let cost = 0
+    let altCost = 0
     let missing = 0
     const usage = new Map<string, { qty: number, price: number, pn: string, name: string }>()
-    
+
     for (const pi of p.items) {
       const qty = pi.quantitySum ?? 1
       const effectivePrice = getEffectivePrice(pi.item)
+      const altIds = pi.item.alternatives ? pi.item.alternatives.split(';').map(s => s.trim()).filter(Boolean) : []
+      const altPrice = getAltEffectivePrice(pi.item, altIds, ssAltMap)
 
       if (!effectivePrice || effectivePrice <= 0) {
         missing++
@@ -326,8 +409,15 @@ costing.get('/supersets', async (c) => {
         cost += priceUSD * qty
         usage.set(pi.item.stableId, { qty, price: priceUSD, pn: pi.item.partNumber || '', name: pi.item.productName || '' })
       }
+      if (altPrice && altPrice > 0) {
+        const itemRate = DEFAULT_RATES[pi.item.priceCurrency ?? 'USD'] ?? 1
+        altCost += (altPrice / itemRate) * qty
+      } else if (effectivePrice && effectivePrice > 0) {
+        const itemRate = DEFAULT_RATES[pi.item.priceCurrency ?? 'USD'] ?? 1
+        altCost += (effectivePrice / itemRate) * qty
+      }
     }
-    productData.set(p.id, { cost, missing, itemUsage: usage })
+    productData.set(p.id, { cost, altCost, missing, itemUsage: usage })
   }
 
   // 2. Resolve Projects
@@ -342,6 +432,7 @@ costing.get('/supersets', async (c) => {
     let totalMissing = 0
     const projectItems = new Map<string, { qty: number, price: number, pn: string, name: string, totalCost: number }>()
 
+    let altTotalCostUSD = 0
     for (const si of ss.items) {
       const setQtys = await resolveSetProductQtys(si.setId)
       for (const [productId, productQty] of setQtys.entries()) {
@@ -349,9 +440,9 @@ costing.get('/supersets', async (c) => {
         const pd = productData.get(productId)
         if (pd) {
           totalCostUSD += pd.cost * scaled
-          totalMissing += pd.missing // Note: this might count same item multiple times if in different products
+          altTotalCostUSD += pd.altCost * scaled
+          totalMissing += pd.missing
 
-          // Aggregate items for budget drainer
           for (const [stableId, usage] of pd.itemUsage.entries()) {
             const existing = projectItems.get(stableId)
             const itemTotalQty = usage.qty * scaled
@@ -359,12 +450,12 @@ costing.get('/supersets', async (c) => {
               existing.qty += itemTotalQty
               existing.totalCost += usage.price * itemTotalQty
             } else {
-              projectItems.set(stableId, { 
-                qty: itemTotalQty, 
-                price: usage.price, 
-                pn: usage.pn, 
-                name: usage.name, 
-                totalCost: usage.price * itemTotalQty 
+              projectItems.set(stableId, {
+                qty: itemTotalQty,
+                price: usage.price,
+                pn: usage.pn,
+                name: usage.name,
+                totalCost: usage.price * itemTotalQty
               })
             }
           }
@@ -389,6 +480,8 @@ costing.get('/supersets', async (c) => {
       missingPrices: totalMissing,
       totalUSD: totalCostUSD,
       total: totalCostUSD * rate,
+      altTotalUSD: altTotalCostUSD,
+      altTotal: altTotalCostUSD * rate,
       currency,
       budgetDrainers: drainers
     }

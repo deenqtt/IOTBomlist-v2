@@ -8,6 +8,8 @@ export interface ProductCost {
   missingPrices: number
   totalUSD: number
   total: number
+  altTotalUSD: number
+  altTotal: number
   currency: string
 }
 
@@ -19,6 +21,8 @@ export interface SetCost {
   missingPrices: number
   totalUSD: number
   total: number
+  altTotalUSD: number
+  altTotal: number
   currency: string
 }
 
@@ -37,6 +41,8 @@ export interface ProjectCost {
   missingPrices: number
   totalUSD: number
   total: number
+  altTotalUSD: number
+  altTotal: number
   currency: string
   budgetDrainers: {
     stableId: string
@@ -54,7 +60,7 @@ export function useProductCosts(currency: string, ids?: number[]) {
     queryFn: async () => (await api.get('/costing/products', { 
       params: { currency, ids: ids?.join(',') } 
     })).data,
-    staleTime: 60_000,
+    staleTime: Infinity,
   })
 }
 
@@ -64,7 +70,7 @@ export function useSetCosts(currency: string, ids?: number[]) {
     queryFn: async () => (await api.get('/costing/sets', { 
       params: { currency, ids: ids?.join(',') } 
     })).data,
-    staleTime: 60_000,
+    staleTime: Infinity,
   })
 }
 
@@ -72,7 +78,7 @@ export function useSupplierCosts(currency: string) {
   return useQuery<SupplierCost[]>({
     queryKey: ['costing-by-supplier', currency],
     queryFn: async () => (await api.get('/costing/by-supplier', { params: { currency } })).data,
-    staleTime: 60_000,
+    staleTime: Infinity,
   })
 }
 
@@ -82,7 +88,7 @@ export function useProjectCosts(currency: string, ids?: number[]) {
     queryFn: async () => (await api.get('/costing/supersets', { 
       params: { currency, ids: ids?.join(',') } 
     })).data,
-    staleTime: 60_000,
+    staleTime: Infinity,
   })
 }
 

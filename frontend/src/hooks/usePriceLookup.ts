@@ -21,6 +21,7 @@ export interface LookupResult {
   voltageRating?: string | null
   tolerance?: string | null
   package?: string | null
+  specs?: string | null
   source: 'lcsc' | 'mouser' | 'digikey' | 'other'
 }
 

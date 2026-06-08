@@ -17,13 +17,13 @@ function extractSpecsFromDesc(description: string): {
   const d = description ?? ''
 
   const valueMatch =
-    d.match(/\b\d+(?:\.\d+)?\s*(?:nF|uF|µF|pF|mF)\b/i) ||
-    d.match(/\b\d+(?:\.\d+)?\s*(?:mH|uH|µH|nH)\b/i) ||
-    d.match(/\b\d+(?:\.\d+)?\s*[kKM]?\s*(?:Ω|[Oo]hms?)\b/) ||
-    d.match(/\b\d+(?:\.\d+)?\s*[kKM]\b(?!\s*(?:Hz|W|V|ohm))/i)
+    d.match(/(?:^|\s)\d+(?:\.\d+)?\s*(?:nF|uF|µF|pF|mF)(?=$|\s|[,;])/i) ||
+    d.match(/(?:^|\s)\d+(?:\.\d+)?\s*(?:mH|uH|µH|nH)(?=$|\s|[,;])/i) ||
+    d.match(/(?:^|\s)\d+(?:\.\d+)?\s*[kKM]?\s*(?:Ω|[Oo]hms?)(?=$|\s|[,;])/) ||
+    d.match(/(?:^|\s)\d+(?:\.\d+)?\s*[kKM](?=$|\s|[,;])(?!\s*(?:Hz|W|V|ohm))/i)
   const value = valueMatch ? valueMatch[0].trim() : null
 
-  const voltageMatch = d.match(/\b\d+(?:\.\d+)?\s*V(?:DC)?\b/i)
+  const voltageMatch = d.match(/(?:^|\s)\d+(?:\.\d+)?\s*V(?:DC)?(?=$|\s|[,;])/i)
   const voltageRating = voltageMatch ? voltageMatch[0].trim() : null
 
   const toleranceMatch = d.match(/[±]?\s*\d+(?:\.\d+)?\s*%/)
@@ -84,62 +84,63 @@ function extractManufacturerFromUrl(url: string, mpn: string): string | null {
 function normalizeLcscItem(item: Record<string, unknown>): Record<string, unknown> {
   const raw = (item.raw ?? {}) as Record<string, unknown>
 
-  const description = (item.description as string | null)
-    ?? (raw.description as string | null)
-    ?? null
+  // Prioritize the longest description string for regex extraction
+  const allDescs = [
+    item.description as string,
+    raw.description as string,
+    raw.componentModelEn as string,
+    raw.componentSpecificationEn as string
+  ].filter(v => typeof v === 'string' && v.length > 0)
+  const description = allDescs.sort((a, b) => b.length - a.length)[0] || null
 
   // raw.componentSpecification = confirmed package field (e.g. "1206", "0603")
   const packageInfo = (item.package as string | null)
-    ?? (raw.componentSpecification as string | null)
-    ?? null
+    || (raw.componentSpecification as string | null)
+    || null
 
   // Extract manufacturer from dataManualUrl filename (JLC API has no dedicated brand field)
-  const mpn = (item.mpn as string | null) ?? (raw.componentModel as string | null) ?? ''
-  const dataManualUrl = (raw.dataManualUrl as string | null) ?? ''
+  const mpn = (item.mpn as string | null) || (raw.componentModel as string | null) || ''
+  const dataManualUrl = (raw.dataManualUrl as string | null) || ''
 
   // Manufacturer: get from item or extract from dataManualUrl, then strip JLCPCB internal prefix
   // e.g. "2210171730_ElecSuper" → "ElecSuper"
   const rawMfr = (item.manufacturer as string | null)
-    ?? extractManufacturerFromUrl(dataManualUrl, mpn)
-    ?? null
+    || extractManufacturerFromUrl(dataManualUrl, mpn)
+    || null
   const manufacturer = rawMfr ? (rawMfr.replace(/^\d+_/, '').trim() || null) : null
 
   // category: raw.firstTypeName / secondTypeName (confirmed)
   const catFromRaw = [raw.firstTypeName, raw.secondTypeName].filter(Boolean).join(' / ') || null
-  const category = (item.category as string | null) ?? catFromRaw
+  const category = (item.category as string | null) || catFromRaw
 
   // Datasheet: prefer public dataManualUrl (lcsc.com) over jlcpcb.com internal API URL
-  const jlcDatasheet = (raw.datasheetUrl as string | null) ?? (item.datasheet as string | null) ?? null
-  const publicDatasheet = (raw.dataManualUrl as string | null) ?? null
-  const datasheet = publicDatasheet ?? jlcDatasheet ?? null
+  const jlcDatasheet = (raw.datasheetUrl as string | null) || (item.datasheet as string | null) || null
+  const publicDatasheet = (raw.dataManualUrl as string | null) || null
+  const datasheet = publicDatasheet || jlcDatasheet || null
 
   // Purchase URL: construct from LCSC C-code (sidecar does not return purchase URL)
-  const lcscCode = (item.lcsc as string | null) ?? null
+  const lcscCode = (item.lcsc as string | null) || null
   const purchaseUrl = lcscCode ? `https://www.lcsc.com/product-detail/${lcscCode}.html` : null
 
   // specs: prefer structured parameters array, fallback to regex on description
-  const params = (raw.parameters as { parameterName: string; parameterValue: string }[]) ?? []
+  const params = (raw.parameters as { parameterName: string; parameterValue: string }[]) || []
   const structuredSpecs = params.length > 0
     ? extractFromParameters(params)
     : { value: null, voltageRating: null, tolerance: null }
   
-  if (params.length > 0) {
-    console.log(`[LCSC Debug] Extracted Specs from ${params.length} parameters:`, structuredSpecs)
-  }
-
   const descSpecs = description ? extractSpecsFromDesc(description) : { value: null, voltageRating: null, tolerance: null, package: null }
 
   return {
     ...item,
-    description: description ?? undefined,
-    package: packageInfo ?? descSpecs.package ?? undefined,
-    manufacturer: manufacturer ?? undefined,
-    category: category ?? undefined,
-    datasheet: datasheet ?? undefined,
-    url: purchaseUrl ?? undefined,   // purchase URL, not datasheet
-    value: (item.value as string | null) ?? structuredSpecs.value ?? descSpecs.value ?? undefined,
-    voltageRating: (item.voltageRating as string | null) ?? structuredSpecs.voltageRating ?? descSpecs.voltageRating ?? undefined,
-    tolerance: (item.tolerance as string | null) ?? structuredSpecs.tolerance ?? descSpecs.tolerance ?? undefined,
+    description: description || undefined,
+    package: packageInfo || descSpecs.package || undefined,
+    manufacturer: manufacturer || undefined,
+    category: category || undefined,
+    datasheet: datasheet || undefined,
+    url: purchaseUrl || undefined,   // purchase URL, not datasheet
+    value: (item.value as string | null) || structuredSpecs.value || descSpecs.value || undefined,
+    voltageRating: (item.voltageRating as string | null) || structuredSpecs.voltageRating || descSpecs.voltageRating || undefined,
+    tolerance: (item.tolerance as string | null) || structuredSpecs.tolerance || descSpecs.tolerance || undefined,
     quantity_available: (item.quantity_available as number | null)
       ?? (item.quantityAvailable as number | null)
       ?? null,

@@ -10,7 +10,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Sparkles } from 'lucide-react'
+import api from '@/lib/api'
+import { toast } from 'sonner'
 
 interface Props {
   open: boolean
@@ -37,8 +39,35 @@ export function ItemFormModal({ open, item, onClose, onSave }: Props) {
   const [form, setForm] = useState<Partial<Item>>({})
   const [spMap, setSpMap] = useState<SupplierPricesMap>({})
   const [loading, setLoading] = useState(false)
+  const [enriching, setEnriching] = useState(false)
   const [error, setError] = useState('')
   const { data: meta } = useItemMetaAll()
+
+  async function handleEnrichSpecs() {
+    const mpn = form.partNumber
+    if (!mpn) return
+    setEnriching(true)
+    try {
+      const res = await api.post('/digikey/specs', { mpn })
+      if (res.data?.specs) {
+        setForm(f => ({
+          ...f,
+          specs: res.data.specs,
+          ...(res.data.voltageRating && !f.voltageRating ? { voltageRating: res.data.voltageRating } : {}),
+          ...(res.data.value && !f.value ? { value: res.data.value } : {}),
+          ...(res.data.package && !f.package ? { package: res.data.package } : {}),
+          ...(res.data.tolerance && !f.tolerance ? { tolerance: res.data.tolerance } : {}),
+        }))
+        toast.success('Specs enriched from DigiKey')
+      } else {
+        toast.warning('No specs found on DigiKey for this MPN')
+      }
+    } catch {
+      toast.error('DigiKey enrichment failed')
+    } finally {
+      setEnriching(false)
+    }
+  }
 
   useEffect(() => {
     const base = item ?? { priceCurrency: 'USD' }
@@ -184,6 +213,44 @@ export function ItemFormModal({ open, item, onClose, onSave }: Props) {
               </Field>
             </div>
           </Section>
+
+          {/* Specs section */}
+          <div className="border border-border rounded-lg overflow-hidden">
+            <div className="px-4 py-2.5 bg-muted/40 border-b border-border flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Specifications (DigiKey)</span>
+              {isEdit && form.partNumber && (
+                <button
+                  type="button"
+                  onClick={handleEnrichSpecs}
+                  disabled={enriching}
+                  className="flex items-center gap-1 text-xs text-primary hover:opacity-80 disabled:opacity-50"
+                >
+                  {enriching ? <RefreshCw size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                  {enriching ? 'Fetching…' : (form.specs ? 'Re-enrich' : 'Enrich from DigiKey')}
+                </button>
+              )}
+            </div>
+            {form.specs ? (() => {
+              let parsed: Record<string, string> = {}
+              try { parsed = JSON.parse(form.specs as string) } catch { return null }
+              const entries = Object.entries(parsed)
+              if (!entries.length) return null
+              return (
+                <div className="divide-y divide-border">
+                  {entries.map(([k, v]) => (
+                    <div key={k} className="flex px-4 py-1.5 text-sm">
+                      <span className="w-1/2 text-muted-foreground shrink-0">{k}</span>
+                      <span className="font-medium">{v}</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            })() : (
+              <div className="px-4 py-3 text-sm text-muted-foreground">
+                No specs data.{isEdit && form.partNumber ? ' Click "Enrich from DigiKey" to fetch.' : ''}
+              </div>
+            )}
+          </div>
 
           {error && (
             <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-sm text-destructive">

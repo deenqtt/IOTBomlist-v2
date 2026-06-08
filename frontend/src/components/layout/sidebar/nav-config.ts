@@ -5,6 +5,7 @@ import {
   FolderTree,
   ShieldCheck,
   BarChart3,
+  KeyRound,
 } from "lucide-react";
 import type { ElementType } from "react";
 
@@ -59,7 +60,10 @@ export const NAV_CONFIG: NavSectionConfig[] = [
     label: "Configure",
     role: "admin",
     defaultCollapsed: true,
-    items: [{ href: "/admin", label: "System Control", icon: ShieldCheck }],
+    items: [
+      { href: "/admin", label: "System Control", icon: ShieldCheck },
+      { href: "/configure", label: "API Keys", icon: KeyRound, role: "super" as NavRole },
+    ],
   },
 ];
 

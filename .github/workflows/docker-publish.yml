@@ -19,7 +19,7 @@ jobs:
         id: lower
         run: echo "owner_lc=${OWNER,,}" >> $GITHUB_OUTPUT
         env:
-          OWNER: ${{ github.repository_owner }}
+          OWNER: ${{ secrets.GHCR_OWNER || github.repository_owner }}
 
       - name: Short SHA
         id: sha

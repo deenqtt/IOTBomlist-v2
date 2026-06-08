@@ -12,7 +12,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import {
   Search, Pencil, Trash2, Download, ChevronRight,
-  X, Layers, FileText, RefreshCw, Plus, Settings2,
+  X, Layers, FileText, RefreshCw, Plus, Settings2, Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -419,9 +419,9 @@ export default function SetsPage() {
                   {/* Cost Column */}
                   <td className="px-4 py-3 text-right">
                     {costsLoading || isFetchingCosts ? (
-                      <Skeleton className="h-4 w-16 ml-auto rounded opacity-50" />
+                      <div className="flex justify-end"><Loader2 size={14} className="animate-spin text-muted-foreground" /></div>
                     ) : costInfo ? (
-                      <div className="flex flex-col items-end">
+                      <div className="flex flex-col items-end gap-0.5">
                         <span className="font-mono text-[13px] font-bold text-foreground">
                           {costInfo.total > 0 ? (
                             `USD ${fmt(costInfo.total, 'USD')}`
@@ -429,6 +429,12 @@ export default function SetsPage() {
                             <span className="text-muted-foreground/30">—</span>
                           )}
                         </span>
+                        {costInfo.altTotal > 0 && costInfo.altTotal < costInfo.total && (
+                          <span className="font-mono text-[10px] text-green-500 font-bold">
+                            Alt: USD {fmt(costInfo.altTotal, 'USD')}
+                            <span className="ml-1 opacity-70">({Math.round((1 - costInfo.altTotal / costInfo.total) * 100)}% cheaper)</span>
+                          </span>
+                        )}
                         {costInfo.missingPrices > 0 && (
                           <div className="flex items-center gap-1 text-[9px] font-black text-amber-600 bg-amber-500/10 px-1.5 rounded-full border border-amber-500/20 uppercase tracking-tighter">
                             <AlertCircle size={8} /> {costInfo.missingPrices} missing

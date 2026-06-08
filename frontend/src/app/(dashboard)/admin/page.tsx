@@ -59,12 +59,22 @@ import {
   Package,
   Rows3,
   DollarSign,
+  TrendingUp,
+  PlayCircle,
+  XCircle,
+  Loader2,
 } from "lucide-react";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 
-type Tab = "users" | "changelog" | "warehouse" | "import" | "backup";
+type Tab =
+  | "users"
+  | "changelog"
+  | "warehouse"
+  | "import"
+  | "backup"
+  | "pricesync";
 
 // ─── Role Badge ─────────────────────────────────────────────────────────────
 
@@ -1096,7 +1106,14 @@ function ImportTab() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [step, setStep] = useState<"upload" | "preflight" | "injecting" | "verification" | "finished" | "enriching">("upload");
+  const [step, setStep] = useState<
+    | "upload"
+    | "preflight"
+    | "injecting"
+    | "verification"
+    | "finished"
+    | "enriching"
+  >("upload");
   const [analysis, setAnalysis] = useState<ImportResult | null>(null);
   const [integrity, setIntegrity] = useState<IntegrityReport | null>(null);
   const [autoEnrich, setAutoEnrich] = useState(false);
@@ -1132,10 +1149,14 @@ function ImportTab() {
     const fd = new FormData();
     fd.append("file", file);
     try {
-      const res = await api.post(`/admin/import?dryRun=false&autoEnrich=${autoEnrich}`, fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-        timeout: 30 * 60 * 1000, // 30 min — enrich 800+ items hits LCSC/Mouser/DigiKey
-      });
+      const res = await api.post(
+        `/admin/import?dryRun=false&autoEnrich=${autoEnrich}`,
+        fd,
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+          timeout: 30 * 60 * 1000, // 30 min — enrich 800+ items hits LCSC/Mouser/DigiKey
+        },
+      );
       setAnalysis(res.data);
       await runVerification();
     } catch (err: unknown) {
@@ -1149,14 +1170,14 @@ function ImportTab() {
     setStep("verification");
     try {
       // Small delay for drama and ensuring DB consistency
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise((r) => setTimeout(r, 1500));
       const res = await api.get("/admin/verify-integrity");
       setIntegrity(res.data);
 
       // Invalidate all costing to force fresh recalculation
-      qc.invalidateQueries({ queryKey: ['costing-products'] });
-      qc.invalidateQueries({ queryKey: ['costing-sets'] });
-      qc.invalidateQueries({ queryKey: ['costing-projects'] });
+      qc.invalidateQueries({ queryKey: ["costing-products"] });
+      qc.invalidateQueries({ queryKey: ["costing-sets"] });
+      qc.invalidateQueries({ queryKey: ["costing-projects"] });
 
       setStep("finished");
     } catch {
@@ -1460,46 +1481,62 @@ function ImportTab() {
                 <div className="bg-primary border border-primary/20 rounded-3xl p-8 text-primary-foreground shadow-xl shadow-primary/20 flex flex-col gap-6 relative overflow-hidden group">
                   <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl group-hover:scale-110 transition-transform" />
                   <div className="space-y-2 relative z-10">
-                     <h3 className="text-lg font-black leading-tight">Proceed with Injection?</h3>
-                     <p className="text-[11px] font-medium opacity-80 leading-relaxed">
-                        All data will be processed using UPSERT logic. Existing records will be updated, and new records will be added to the system.
-                     </p>
+                    <h3 className="text-lg font-black leading-tight">
+                      Proceed with Injection?
+                    </h3>
+                    <p className="text-[11px] font-medium opacity-80 leading-relaxed">
+                      All data will be processed using UPSERT logic. Existing
+                      records will be updated, and new records will be added to
+                      the system.
+                    </p>
                   </div>
 
                   <div className="bg-white/10 p-4 rounded-2xl border border-white/10 space-y-3 relative z-10">
-                     <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                           <div className="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center">
-                              <Zap size={12} className="text-white" />
-                           </div>
-                           <span className="text-[10px] font-black uppercase tracking-widest text-white">Auto-Enrich Prices</span>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center">
+                          <Zap size={12} className="text-white" />
                         </div>
-                        <button 
-                          onClick={() => setAutoEnrich(!autoEnrich)}
+                        <span className="text-[10px] font-black uppercase tracking-widest text-white">
+                          Auto-Enrich Prices
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setAutoEnrich(!autoEnrich)}
+                        className={cn(
+                          "w-10 h-5 rounded-full transition-all relative border-2 border-white/20",
+                          autoEnrich ? "bg-white" : "bg-transparent",
+                        )}
+                      >
+                        <div
                           className={cn(
-                            "w-10 h-5 rounded-full transition-all relative border-2 border-white/20",
-                            autoEnrich ? "bg-white" : "bg-transparent"
+                            "w-3 h-3 rounded-full absolute top-0.5 transition-all",
+                            autoEnrich
+                              ? "right-0.5 bg-primary"
+                              : "left-0.5 bg-white",
                           )}
-                        >
-                           <div className={cn(
-                              "w-3 h-3 rounded-full absolute top-0.5 transition-all",
-                              autoEnrich ? "right-0.5 bg-primary" : "left-0.5 bg-white"
-                           )} />
-                        </button>
-                     </div>
-                     <p className="text-[9px] font-medium leading-relaxed opacity-70">
-                        Search LCSC/Mouser/Digikey for missing prices during import. <span className="font-black italic">May slow down the process.</span>
-                     </p>
+                        />
+                      </button>
+                    </div>
+                    <p className="text-[9px] font-medium leading-relaxed opacity-70">
+                      Search LCSC/Mouser/Digikey for missing prices during
+                      import.{" "}
+                      <span className="font-black italic">
+                        May slow down the process.
+                      </span>
+                    </p>
                   </div>
 
-                  <button 
-                     onClick={handleConfirmInjection}
-                     className="w-full h-14 rounded-2xl bg-white text-primary font-black uppercase tracking-[0.2em] text-xs shadow-lg hover:scale-[1.02] active:scale-95 transition-all relative z-10"
+                  <button
+                    onClick={handleConfirmInjection}
+                    className="w-full h-14 rounded-2xl bg-white text-primary font-black uppercase tracking-[0.2em] text-xs shadow-lg hover:scale-[1.02] active:scale-95 transition-all relative z-10"
                   >
-                     Confirm & Commit
+                    Confirm & Commit
                   </button>
-                  <p className="text-[9px] font-black uppercase tracking-widest text-center opacity-60">System-wide Impact</p>
-                  </div>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-center opacity-60">
+                    System-wide Impact
+                  </p>
+                </div>
 
                 <div className="p-6 rounded-3xl border border-border bg-muted/20 flex gap-4">
                   <Info
@@ -1507,7 +1544,9 @@ function ImportTab() {
                     className="text-muted-foreground shrink-0 mt-0.5"
                   />
                   <p className="text-[10px] font-medium text-muted-foreground leading-relaxed">
-                     Neural Analysis ensures that no &quot;orphaned&quot; records are created. If an item is missing in the Master list, the system will warn you.
+                    Neural Analysis ensures that no &quot;orphaned&quot; records
+                    are created. If an item is missing in the Master list, the
+                    system will warn you.
                   </p>
                 </div>
               </div>
@@ -1517,7 +1556,9 @@ function ImportTab() {
       )}
 
       {/* ── Step 3: Injecting & Verification ── */}
-      {(step === "injecting" || step === "verification" || step === "enriching") && (
+      {(step === "injecting" ||
+        step === "verification" ||
+        step === "enriching") && (
         <div className="p-20 border border-border rounded-[40px] bg-card flex flex-col items-center justify-center gap-10 shadow-2xl relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.03] to-transparent" />
 
@@ -1536,10 +1577,18 @@ function ImportTab() {
           <div className="text-center space-y-6 relative z-10">
             <div className="space-y-1">
               <h2 className="text-2xl font-black tracking-tight uppercase tracking-[0.2em]">
-                {step === "enriching" ? "Searching Neural Net" : step === "injecting" ? "Synchronizing Data Streams" : "Finalizing System Integrity"}
+                {step === "enriching"
+                  ? "Searching Neural Net"
+                  : step === "injecting"
+                    ? "Synchronizing Data Streams"
+                    : "Finalizing System Integrity"}
               </h2>
               <p className="text-xs text-muted-foreground font-medium italic">
-                {step === "enriching" ? "Querying LCSC/Mouser/Digikey API for missing price data..." : step === "injecting" ? "Mapping multi-layered relations into PostgreSQL database..." : "Performing deep scan of relational integrity..."}
+                {step === "enriching"
+                  ? "Querying LCSC/Mouser/Digikey API for missing price data..."
+                  : step === "injecting"
+                    ? "Mapping multi-layered relations into PostgreSQL database..."
+                    : "Performing deep scan of relational integrity..."}
               </p>
             </div>
 
@@ -1547,16 +1596,56 @@ function ImportTab() {
             <div className="flex flex-col items-start gap-3 bg-muted/20 p-6 rounded-2xl border border-border mx-auto w-72">
               {[
                 { label: "Parsing Excel Blobs", done: true },
-                { label: "Neural Search", done: step === "injecting" || step === "verification", active: step === "enriching" && autoEnrich, hidden: !autoEnrich },
-                { label: "Relational Mapping", done: step === "verification", active: step === "injecting" },
-                { label: "Atomic DB Write", done: step === "verification", active: step === "injecting" },
-                { label: "Integrity Audit", done: false, active: step === "verification" }
-              ].filter(s => !s.hidden).map(s => (
-                <div key={s.label} className={cn("flex items-center gap-3 text-[10px] font-black uppercase tracking-widest", s.done ? "text-green-500" : s.active ? "text-primary animate-pulse" : "text-muted-foreground opacity-30")}>
-                  {s.done ? <Check size={12} strokeWidth={4} /> : <div className={cn("w-3 h-3 rounded-full border-2", s.active ? "border-primary border-t-transparent animate-spin" : "border-muted")} />}
-                  {s.label}
-                </div>
-              ))}
+                {
+                  label: "Neural Search",
+                  done: step === "injecting" || step === "verification",
+                  active: step === "enriching" && autoEnrich,
+                  hidden: !autoEnrich,
+                },
+                {
+                  label: "Relational Mapping",
+                  done: step === "verification",
+                  active: step === "injecting",
+                },
+                {
+                  label: "Atomic DB Write",
+                  done: step === "verification",
+                  active: step === "injecting",
+                },
+                {
+                  label: "Integrity Audit",
+                  done: false,
+                  active: step === "verification",
+                },
+              ]
+                .filter((s) => !s.hidden)
+                .map((s) => (
+                  <div
+                    key={s.label}
+                    className={cn(
+                      "flex items-center gap-3 text-[10px] font-black uppercase tracking-widest",
+                      s.done
+                        ? "text-green-500"
+                        : s.active
+                          ? "text-primary animate-pulse"
+                          : "text-muted-foreground opacity-30",
+                    )}
+                  >
+                    {s.done ? (
+                      <Check size={12} strokeWidth={4} />
+                    ) : (
+                      <div
+                        className={cn(
+                          "w-3 h-3 rounded-full border-2",
+                          s.active
+                            ? "border-primary border-t-transparent animate-spin"
+                            : "border-muted",
+                        )}
+                      />
+                    )}
+                    {s.label}
+                  </div>
+                ))}
             </div>
           </div>
         </div>
@@ -2023,6 +2112,397 @@ function BackupTab() {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────
 
+// ─── Price Sync Tab ─────────────────────────────────────────────────────────
+
+function PriceSyncTab() {
+  const qc = useQueryClient();
+  const [mode, setMode] = useState<"missing" | "all">("missing");
+  const [job, setJob] = useState<{
+    status: "running" | "done" | "error";
+    total: number;
+    done: number;
+    updated: number;
+    failed: number;
+    startedAt: number;
+    finishedAt?: number;
+  } | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const tickRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPoll = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+  const stopTick = () => {
+    if (tickRef.current) {
+      clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
+  };
+
+  React.useEffect(
+    () => () => {
+      stopPoll();
+      stopTick();
+    },
+    [],
+  );
+
+  async function startJob() {
+    setStarting(true);
+    setStartError(null);
+    try {
+      const res = await api.post("/admin/refresh-prices", { mode });
+      const startedAt = Date.now();
+      setJob({
+        status: "running",
+        total: res.data.total,
+        done: 0,
+        updated: 0,
+        failed: 0,
+        startedAt,
+      });
+      setNow(startedAt);
+      tickRef.current = setInterval(() => setNow(Date.now()), 1000);
+      pollRef.current = setInterval(async () => {
+        try {
+          const r = await api.get(`/admin/refresh-prices/${res.data.jobId}`);
+          setJob(r.data);
+          if (r.data.status !== "running") {
+            stopPoll();
+            stopTick();
+            qc.invalidateQueries({ queryKey: ["costing-products"] });
+            qc.invalidateQueries({ queryKey: ["costing-sets"] });
+            qc.invalidateQueries({ queryKey: ["costing-projects"] });
+            qc.invalidateQueries({ queryKey: ["items"] });
+          }
+        } catch {
+          stopPoll();
+          stopTick();
+        }
+      }, 3000);
+    } catch {
+      setStartError("Failed to start sync — check server connection");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  function reset() {
+    stopPoll();
+    stopTick();
+    setJob(null);
+  }
+
+  const pct =
+    job && job.total > 0 ? Math.round((job.done / job.total) * 100) : 0;
+  const elapsed = job
+    ? Math.round(((job.finishedAt ?? now) - job.startedAt) / 1000)
+    : 0;
+  const ratePerSec = job && elapsed > 0 ? job.done / elapsed : 0;
+  const remaining = job ? job.total - job.done : 0;
+  const eta =
+    ratePerSec > 0 && remaining > 0 ? Math.ceil(remaining / ratePerSec) : null;
+
+  const SUPPLIERS = [
+    {
+      key: "lcsc",
+      label: "LCSC",
+      color: "text-blue-400",
+      bg: "bg-blue-500/10 border-blue-500/20",
+    },
+    {
+      key: "mouser",
+      label: "Mouser",
+      color: "text-orange-400",
+      bg: "bg-orange-500/10 border-orange-500/20",
+    },
+    {
+      key: "digikey",
+      label: "DigiKey",
+      color: "text-yellow-400",
+      bg: "bg-yellow-500/10 border-yellow-500/20",
+    },
+  ];
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 text-primary shadow-inner">
+          <DollarSign size={22} />
+        </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-black tracking-tight leading-none">
+              Market Price Sync
+            </h2>
+            <span className="text-[9px] font-black uppercase tracking-widest text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">
+              Live
+            </span>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1 opacity-70">
+            Fetch latest prices · Est. costs auto-refresh after sync
+          </p>
+        </div>
+      </div>
+
+      {/* Supplier badges */}
+      <div className="flex gap-2">
+        {SUPPLIERS.map((s) => (
+          <div
+            key={s.key}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-black uppercase tracking-wide",
+              s.bg,
+              s.color,
+            )}
+          >
+            <div className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+            {s.label}
+          </div>
+        ))}
+      </div>
+
+      {!job && (
+        <div className="space-y-4">
+          {/* Scope selector */}
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-border bg-muted/20">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                Sync Scope
+              </p>
+            </div>
+            <div className="p-3 flex flex-col gap-2">
+              {(
+                [
+                  [
+                    "missing",
+                    "Missing Prices Only",
+                    "Only items with no price data — much faster",
+                    Zap,
+                  ],
+                  [
+                    "all",
+                    "All Items",
+                    "Re-fetch every item regardless of existing price",
+                    RefreshCw,
+                  ],
+                ] as const
+              ).map(([val, label, desc, Icon]) => (
+                <button
+                  key={val}
+                  onClick={() => setMode(val)}
+                  className={cn(
+                    "flex items-center gap-3 p-3 rounded-lg border text-left transition-all",
+                    mode === val
+                      ? "border-primary bg-primary/5"
+                      : "border-border bg-muted/20 hover:border-muted-foreground/30",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                      mode === val
+                        ? "bg-primary/15 text-primary"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    <Icon size={15} />
+                  </div>
+                  <div className="min-w-0">
+                    <p
+                      className={cn(
+                        "text-sm font-black",
+                        mode === val
+                          ? "text-foreground"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {label}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground opacity-70 mt-0.5">
+                      {desc}
+                    </p>
+                  </div>
+                  <div
+                    className={cn(
+                      "ml-auto w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center",
+                      mode === val ? "border-primary" : "border-border",
+                    )}
+                  >
+                    {mode === val && (
+                      <div className="w-2 h-2 rounded-full bg-primary" />
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button
+            onClick={startJob}
+            disabled={starting}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-black uppercase tracking-wider hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {starting ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <PlayCircle size={15} />
+            )}
+            {starting ? "Starting..." : "Start Sync"}
+          </button>
+          {startError && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive font-medium">
+              <XCircle size={12} className="shrink-0" />
+              {startError}
+            </div>
+          )}
+        </div>
+      )}
+
+      {job && (
+        <div className="space-y-3">
+          {/* Progress card */}
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            {/* Status bar */}
+            <div
+              className={cn(
+                "px-4 py-3 flex items-center justify-between border-b border-border",
+                job.status === "running"
+                  ? "bg-primary/5"
+                  : job.status === "done"
+                    ? "bg-green-500/5"
+                    : "bg-destructive/5",
+              )}
+            >
+              <div className="flex items-center gap-2">
+                {job.status === "running" ? (
+                  <Loader2 size={14} className="animate-spin text-primary" />
+                ) : job.status === "done" ? (
+                  <CheckCircle2 size={14} className="text-green-500" />
+                ) : (
+                  <XCircle size={14} className="text-destructive" />
+                )}
+                <span
+                  className={cn(
+                    "text-xs font-black uppercase tracking-wider",
+                    job.status === "running"
+                      ? "text-primary"
+                      : job.status === "done"
+                        ? "text-green-500"
+                        : "text-destructive",
+                  )}
+                >
+                  {job.status === "running"
+                    ? "Syncing"
+                    : job.status === "done"
+                      ? "Complete"
+                      : "Error"}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-[11px] text-muted-foreground font-mono">
+                <span>{elapsed}s elapsed</span>
+                {job.status === "running" && eta !== null && (
+                  <span className="text-primary">~{eta}s left</span>
+                )}
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            <div className="px-4 pt-3 pb-1">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-black text-foreground">
+                  {job.done}{" "}
+                  <span className="text-muted-foreground font-normal">
+                    / {job.total} items
+                  </span>
+                </span>
+                <span className="text-xs font-black text-primary">{pct}%</span>
+              </div>
+              <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all duration-700",
+                    job.status === "done" ? "bg-green-500" : "bg-primary",
+                  )}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Stats row */}
+            <div className="grid grid-cols-3 divide-x divide-border border-t border-border mt-3">
+              {[
+                {
+                  label: "Updated",
+                  value: job.updated,
+                  color: "text-green-500",
+                },
+                {
+                  label: "Failed",
+                  value: job.failed,
+                  color:
+                    job.failed > 0
+                      ? "text-destructive"
+                      : "text-muted-foreground",
+                },
+                {
+                  label: "Remaining",
+                  value: remaining,
+                  color: "text-muted-foreground",
+                },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="px-4 py-3 text-center">
+                  <p className={cn("text-lg font-black tabular-nums", color)}>
+                    {value}
+                  </p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground opacity-60 mt-0.5">
+                    {label}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Done summary */}
+          {job.status === "done" && (
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-green-500/5 border border-green-500/20">
+              <TrendingUp
+                size={15}
+                className="text-green-500 mt-0.5 shrink-0"
+              />
+              <div>
+                <p className="text-sm font-black text-green-500">
+                  Costing data refreshed
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {job.updated} items updated in {elapsed}s — PCBs, Sets, and
+                  Projects costs recalculated.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {job.status !== "running" && (
+            <button
+              onClick={reset}
+              className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <RefreshCw size={11} /> Run another sync
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TABS: {
   id: Tab;
   label: string;
@@ -2033,12 +2513,12 @@ const TABS: {
     id: "users",
     label: "Operators",
     icon: <Users size={15} />,
-    superOnly: true,
   },
   { id: "changelog", label: "Audit Log", icon: <ScrollText size={15} /> },
   { id: "warehouse", label: "Warehouse", icon: <Warehouse size={15} /> },
   { id: "import", label: "Data Import", icon: <Upload size={15} /> },
   { id: "backup", label: "Backups", icon: <Download size={15} /> },
+  { id: "pricesync", label: "Price Sync", icon: <TrendingUp size={15} /> },
 ];
 
 export default function AdminPage() {
@@ -2049,7 +2529,7 @@ export default function AdminPage() {
   const { data: logData } = useChangeLog({ limit: 1 });
   const { data: whData } = useWarehouse({ limit: 1 });
 
-  const [tab, setTab] = useState<Tab>(superAdmin ? "users" : "changelog");
+  const [tab, setTab] = useState<Tab>("users");
 
   if (!admin) {
     return (
@@ -2152,11 +2632,12 @@ export default function AdminPage() {
       </div>
 
       <div className="min-h-0 bg-card border-x border-b border-border rounded-b-xl p-6 shadow-sm text-foreground text-foreground">
-        {tab === "users" && superAdmin && <UsersTab currentUserId={user?.id} />}
+        {tab === "users" && admin && <UsersTab currentUserId={user?.id} />}
         {tab === "changelog" && <ChangeLogTab />}
         {tab === "warehouse" && <WarehouseTab />}
         {tab === "import" && <ImportTab />}
         {tab === "backup" && <BackupTab />}
+        {tab === "pricesync" && <PriceSyncTab />}
       </div>
     </div>
   );

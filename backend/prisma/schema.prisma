@@ -54,6 +54,7 @@ model Item {
   voltageRating  String?       @map("voltage_rating")
   tolerance      String?
   supplierPrices String?       @map("supplier_prices") // JSON blob: { lcsc, mouser, digikey, other } each { pn, price, moq, priceBreaks }
+  specs          String?       // JSON blob: { "Parameter": "Value", ... } from DigiKey ProductAttributes
   alternatives   String?       // semicolon-separated stable_ids
   products       ProductItem[]
 

@@ -7,8 +7,9 @@ mouser.use('*', authMiddleware)
 
 const BASE = 'https://api.mouser.com/api/v1'
 
-function getKey(): string {
-  const k = process.env.MOUSER_API_KEY ?? ''
+async function getKey(): Promise<string> {
+  const row = await prisma.systemSetting.findUnique({ where: { key: 'api_mouser_key' } })
+  const k = row?.value || process.env.MOUSER_API_KEY || ''
   if (!k) throw new Error('MOUSER_API_KEY not configured')
   return k
 }
@@ -136,7 +137,7 @@ mouser.post('/search', async (c) => {
   const { keyword, pn, qty = 1, limit = 10 } = await c.req.json()
   if (!keyword && !pn) return c.json({ error: 'keyword or pn required' }, 400)
 
-  const key = getKey()
+  const key = await getKey()
   let parts: Record<string, unknown>[] = []
 
   const searchTerm = (pn || keyword || '').trim()
@@ -183,8 +184,9 @@ mouser.post('/search', async (c) => {
 })
 
 // GET /mouser/healthz
-mouser.get('/healthz', (c) => {
-  const configured = !!process.env.MOUSER_API_KEY
+mouser.get('/healthz', async (c) => {
+  const row = await prisma.systemSetting.findUnique({ where: { key: 'api_mouser_key' } })
+  const configured = !!(row?.value || process.env.MOUSER_API_KEY)
   return c.json({ ok: configured, configured })
 })
 

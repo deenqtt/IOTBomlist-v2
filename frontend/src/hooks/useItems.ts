@@ -81,6 +81,9 @@ export function useUpdateItem() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['items'] })
       qc.invalidateQueries({ queryKey: ['items-meta'] })
+      qc.invalidateQueries({ queryKey: ['costing-products'] })
+      qc.invalidateQueries({ queryKey: ['costing-sets'] })
+      qc.invalidateQueries({ queryKey: ['costing-projects'] })
     },
   })
 }

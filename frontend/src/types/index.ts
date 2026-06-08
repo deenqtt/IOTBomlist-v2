@@ -45,6 +45,7 @@ export interface Item {
   whQty?: number | null
   whLocation?: string | null
   supplierPrices?: string | null
+  specs?: string | null
   alternatives?: string | null
   marketPrice?: number | null
   marketSupplier?: string | null

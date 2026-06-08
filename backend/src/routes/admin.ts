@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
-import { hashPassword } from '../lib/auth.js'
+import { hashPassword, verifyPassword, signToken } from '../lib/auth.js'
 import prisma from '../lib/prisma.js'
 import { authMiddleware, requireRole, AuthUser } from '../middleware/auth.js'
 import { logChange } from '../lib/changelog.js'
+import { clearDigikeyTokenCache } from './digikey.js'
 import { generateBackupBuffer } from '../lib/backup.js'
 import * as XLSX from 'xlsx'
 import { readdirSync, existsSync, readFileSync } from 'fs'
@@ -20,7 +21,7 @@ admin.use('*', authMiddleware)
 
 // ─── Users (super only) ────────────────────────────────────────────────────
 
-admin.get('/users', requireRole('super'), async (c) => {
+admin.get('/users', requireRole('admin', 'super'), async (c) => {
   const users = await prisma.user.findMany({
     select: { id: true, username: true, role: true, createdAt: true },
     orderBy: { username: 'asc' },
@@ -28,7 +29,7 @@ admin.get('/users', requireRole('super'), async (c) => {
   return c.json(users)
 })
 
-admin.post('/users', requireRole('super'), async (c) => {
+admin.post('/users', requireRole('admin', 'super'), async (c) => {
   const { username, password, role = 'user' } = await c.req.json()
   const operator = c.get('user')
   if (!username?.trim() || !password) return c.json({ error: 'username and password required' }, 400)
@@ -54,7 +55,7 @@ admin.post('/users', requireRole('super'), async (c) => {
   return c.json(user, 201)
 })
 
-admin.patch('/users/:id', requireRole('super'), async (c) => {
+admin.patch('/users/:id', requireRole('admin', 'super'), async (c) => {
   const id = Number(c.req.param('id'))
   const { role, password } = await c.req.json()
   const operator = c.get('user')
@@ -101,7 +102,7 @@ admin.patch('/users/:id', requireRole('super'), async (c) => {
   return c.json(user)
 })
 
-admin.delete('/users/:id', requireRole('super'), async (c) => {
+admin.delete('/users/:id', requireRole('admin', 'super'), async (c) => {
   const id = Number(c.req.param('id'))
   const operator = c.get('user')
   
@@ -273,44 +274,348 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
   const errors: string[] = []
   const warnings: string[] = []
 
+  // ── Import helpers ────────────────────────────────────────────────────────
+
+  // Issue #3: Detect internal/custom part codes that cannot be searched on suppliers
+  function isInternalPartCode(pn: string | null | undefined): boolean {
+    if (!pn) return true
+    const s = pn.trim()
+    // Pure numeric 6+ digits (e.g. 102040008, 308070004) → internal stock/serial codes
+    if (/^\d{6,}$/.test(s)) return true
+    // Known internal prefixes used in this dataset
+    if (/^(102|106|201|202|206|307|308|309)\d{6,}$/.test(s)) return true
+    return false
+  }
+
+  // Issue #4 & #5: Extract Value and Package from a description string
+  function extractFromDescription(desc: string | null | undefined): { value: string | null; package: string | null } {
+    if (!desc) return { value: null, package: null }
+    const d = desc
+
+    // Value: resistance (e.g. "47 Ohms", "10 kOhms", "330 Ohms")
+    const resistMatch = d.match(/(\d+(?:\.\d+)?)\s*(k|m|g|meg)?ohms?/i)
+    // Value: capacitance (e.g. "10 µF", "100nF", "0.1uF")
+    const capMatch = d.match(/(\d+(?:\.\d+)?)\s*(µ|u|n|p|μ)F/i)
+    // Value: inductance (e.g. "10 µH", "100nH")
+    const indMatch = d.match(/(\d+(?:\.\d+)?)\s*(µ|u|n|μ)H/i)
+    // Value: voltage (e.g. "5V", "3.3V")
+    const voltMatch = d.match(/(\d+(?:\.\d+)?)\s*V(?:\s|,|$)/i)
+
+    let value: string | null = null
+    if (resistMatch) {
+      const num = resistMatch[1]; const prefix = (resistMatch[2] || '').toLowerCase()
+      value = prefix === 'k' ? `${num}k` : prefix === 'm' ? `${num}M` : `${num}`
+    } else if (capMatch) {
+      const num = capMatch[1]; const prefix = capMatch[2].toLowerCase().replace('μ', 'u').replace('µ', 'u')
+      value = `${num}${prefix}F`
+    } else if (indMatch) {
+      const num = indMatch[1]; const prefix = indMatch[2].toLowerCase().replace('μ', 'u').replace('µ', 'u')
+      value = `${num}${prefix}H`
+    } else if (voltMatch) {
+      value = `${voltMatch[1]}V`
+    }
+
+    // Package: standard SMD/THT sizes
+    const pkgMatch = d.match(/\b(0201|0402|0603|0805|1206|1210|1812|2010|2512|SOT-23(?:-\d+)?|SOT-\d+|SOP-\d+|SOIC-\d+|DIP-\d+|QFN-\d+|QFP-\d+|BGA-\d+|TO-\d+|DO-\d+|Through\s*Hole|SMD|SMT)\b/i)
+    const package_ = pkgMatch ? pkgMatch[1] : null
+
+    return { value, package: package_ }
+  }
+
+  // Issue #6: Validate Value field — reject garbage (part numbers, IDs, product names)
+  function isValidValue(val: string | null | undefined): boolean {
+    if (!val) return false
+    const v = val.trim()
+    // Reject if looks like: C-code, pure numeric ID, MPN-like string with many chars
+    if (/^C\d+$/i.test(v)) return false           // LCSC C-code
+    if (/^\d{6,}$/.test(v)) return false           // internal numeric ID
+    if (/^[A-Z0-9]{8,}$/i.test(v) && !/^[\d.]+\s*(ohm|pf|nf|uf|nh|uh|mh|v|k|m|r)/i.test(v)) return false // long alphanumeric MPN-like
+    if ((v.includes('_') || v.includes('-')) && v.length > 12) return false  // slug/product-name-like
+    return true
+  }
+
+  // Throttle state — shared across all enrichItem calls in this import run
+  let lastMouserCallAt = 0
+  const MOUSER_MIN_INTERVAL_MS = 600 // max ~1.5 req/sec
+
+  // Normalize supplier column value → canonical key
+  function normalizeSupplier(raw: string | null | undefined): 'lcsc' | 'mouser' | 'digikey' | null {
+    if (!raw) return null
+    const s = raw.toLowerCase().replace(/[^a-z]/g, '')
+    if (s.includes('lcsc')) return 'lcsc'
+    if (s.includes('mouser')) return 'mouser'
+    if (s.includes('digikey')) return 'digikey'
+    return null // unsupported: tokopedia, aliexpress, waveshare, dll
+  }
+
   // Helper for Auto-Enrichment (LCSC/Mouser/Digikey)
-  async function enrichItem(sid: string, pn: string, lcsc?: string) {
+  async function enrichItem(sid: string, rawPn: string, lcsc?: string, links?: string, supplierCol?: string, stockCode?: string) {
+    const pn = cleanPN(rawPn, stockCode ?? lcsc) ?? rawPn
+
+    // Issue #3: skip internal/custom part codes — not searchable on any supplier
+    if (!lcsc && isInternalPartCode(pn)) {
+      console.log(`[Auto-Enrich] Skipping internal part code: ${pn} (SID: ${sid})`)
+      return false
+    }
+
+    // Skip if item has zero supplier signals — no supplier col, no links, no LCSC code
+    // These are custom/physical parts (cables, busbars, custom hardware) with no online presence
+    const hasSupplierSignal = !!(lcsc || supplierCol?.trim() || links?.trim())
+    if (!hasSupplierSignal) {
+      console.log(`[Auto-Enrich] Skipping — no supplier/links/LCSC for: ${pn} (SID: ${sid})`)
+      return false
+    }
+
     console.log(`[Auto-Enrich] Initiating for Part: ${pn} (SID: ${sid}, LCSC: ${lcsc || 'N/A'})`);
     try {
       let found = null;
       let source = "";
 
+      // Detect preferred supplier — kolom Supplier(s) sebagai primary, URL scan sebagai fallback
+      type SearchTarget = 'lcsc' | 'mouser' | 'digikey'
+      let preferred: SearchTarget | null = normalizeSupplier(supplierCol)
+      let detectedFrom = 'supplier column'
+
+      if (!preferred) {
+        // Fallback: scan URL
+        const linkStr = (links || '').toLowerCase()
+        const prefersLcsc    = linkStr.includes('lcsc.com')
+        const prefersMouser  = linkStr.includes('mouser.com') || linkStr.includes('mouser.co')
+        const prefersDigikey = linkStr.includes('digikey.com') || linkStr.includes('digikey.co')
+        preferred = prefersLcsc ? 'lcsc' : prefersMouser ? 'mouser' : prefersDigikey ? 'digikey' : null
+        detectedFrom = preferred ? 'url scan' : 'none (default)'
+      }
+
+      // Issue #7: Unsupported supplier (Tokopedia, AliExpress, dll) — no API but still save URL
+      if (supplierCol && !preferred) {
+        console.log(`[Auto-Enrich] Unsupported supplier "${supplierCol}" — saving URL only for ${pn}`)
+        const supKey = supplierCol.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+        // Find URL matching the supplier domain if possible, else first URL
+        const allUrls = (links || '').split(/[;\s]+/).map(u => u.trim()).filter(u => u.startsWith('http'))
+        const domainHints: Record<string, string[]> = {
+          tokopedia: ['tokopedia.com'],
+          aliexpress: ['aliexpress.com', 'aliexpress.us'],
+          waveshare: ['waveshare.com'],
+          shopee: ['shopee.co'],
+          lazada: ['lazada.co'],
+        }
+        const hints = Object.entries(domainHints).find(([k]) => supKey.includes(k))?.[1] ?? []
+        const matchedUrl = hints.length
+          ? allUrls.find(u => hints.some(d => u.toLowerCase().includes(d))) ?? allUrls[0]
+          : allUrls[0]
+        if (matchedUrl) {
+          const spMap: Record<string, unknown> = {}
+          spMap[supKey] = { pn: pn, url: matchedUrl, price: null, quantity_available: null }
+          await prisma.item.update({
+            where: { stableId: sid },
+            data: {
+              links: matchedUrl,
+              supplierPrices: JSON.stringify(spMap),
+              suppliers: supplierCol.trim(),
+            }
+          })
+          console.log(`[Auto-Enrich] Saved URL for unsupported supplier "${supplierCol}": ${matchedUrl}`)
+          return true
+        }
+        return false
+      }
+
+      // If supplier explicitly set from column, skip LCSC for commercial parts (Würth, etc. not on LCSC)
+      const strictSupplier = detectedFrom === 'supplier column'
+      const order: SearchTarget[] = preferred === 'lcsc'
+        ? ['lcsc', 'mouser', 'digikey']
+        : preferred === 'mouser'
+          ? (strictSupplier ? ['mouser', 'digikey'] : ['mouser', 'lcsc', 'digikey'])
+          : preferred === 'digikey'
+            ? (strictSupplier ? ['digikey', 'mouser'] : ['digikey', 'lcsc', 'mouser'])
+            : ['lcsc', 'mouser', 'digikey']
+
+      // Collect unsupported supplier URLs from links (AliExpress, Tokopedia, etc.) to preserve
+      const unsupportedDomains: Record<string, string[]> = {
+        tokopedia:  ['tokopedia.com'],
+        aliexpress: ['aliexpress.com', 'aliexpress.us'],
+        waveshare:  ['waveshare.com'],
+        shopee:     ['shopee.co'],
+        lazada:     ['lazada.co'],
+      }
+      const allLinkUrls = (links || '').split(/[;\s]+/).map(u => u.trim()).filter(u => u.startsWith('http'))
+      const extraUrls: { key: string; url: string }[] = []
+      for (const [key, domains] of Object.entries(unsupportedDomains)) {
+        const url = allLinkUrls.find(u => domains.some(d => u.toLowerCase().includes(d)))
+        if (url) extraUrls.push({ key, url })
+      }
+
+      console.log(`[Auto-Enrich] Preferred: ${preferred || 'none'} (from ${detectedFrom}) | Order: ${order.join(' → ')}${extraUrls.length ? ` | Extra URLs: ${extraUrls.map(e => e.key).join(',')}` : ''}`)
+
+      // No supported supplier found anywhere (URL scan + column both null), BUT have unsupported URLs
+      // → skip auto-enrich entirely, just save the URL so UI shows blue link button
+      if (!preferred && !supplierCol && !lcsc && extraUrls.length > 0) {
+        const fallbackMap: any = {}
+        for (const { key, url } of extraUrls) {
+          fallbackMap[key] = { pn: pn, url, price: null, quantity_available: null }
+        }
+        await prisma.item.update({
+          where: { stableId: sid },
+          data: {
+            links: extraUrls.map(e => e.url).join(';'),
+            supplierPrices: JSON.stringify(fallbackMap),
+          }
+        })
+        console.log(`[Auto-Enrich] Only unsupported supplier URLs for "${pn}" — saved URL, skipped enrich`)
+        return true
+      }
+
+      // LCSC by C-code first (if available) regardless of order
       if (lcsc) {
-        console.log(`[Auto-Enrich] Querying LCSC for: ${lcsc}`);
+        console.log(`[Auto-Enrich] Querying LCSC by C-code: ${lcsc}`);
         const res = await api.post("/lcsc/lookup", { items: [{ lcsc, qty: 1 }] });
         found = res.data?.items?.[0];
         if (found) {
           source = "lcsc";
-          console.log(`[Auto-Enrich] Found on LCSC: ${found.mpn}, Price: ${found.price}, Stock: ${found.quantity_available}`);
+          console.log(`[Auto-Enrich] Found on LCSC: ${found.mpn}, Price: ${found.price}`);
         }
       }
 
-      if (!found && pn) {
-        console.log(`[Auto-Enrich] Querying Mouser for: ${pn}`);
-        const res = await api.post("/mouser/search", { keyword: pn, qty: 1 });
-        found = res.data?.items?.[0];
-        if (found) {
-          source = "mouser";
-          console.log(`[Auto-Enrich] Found on Mouser: ${found.mpn}, Price: ${found.price}, Stock: ${found.quantity_available}`);
+      // Search by MPN/keyword following preferred order
+      for (const target of order) {
+        if (found) break
+        if (!pn) continue
+        try {
+          if (target === 'lcsc') {
+            console.log(`[Auto-Enrich] → Trying LCSC search by keyword: "${pn}"`);
+            const searchRes = await api.post("/lcsc/search", { keyword: pn, limit: 5 });
+            const lcscItems: any[] = searchRes.data?.items ?? [];
+            console.log(`[Auto-Enrich]   LCSC search results (${lcscItems.length}): ${lcscItems.map((r: any) => r.mpn).join(', ') || 'none'}`);
+            const match = lcscItems.find((r: any) => r.mpn?.toLowerCase() === pn.toLowerCase()) ?? lcscItems[0];
+            if (match?.lcsc) {
+              console.log(`[Auto-Enrich]   Best match: ${match.mpn} (${match.lcsc}), doing full lookup...`);
+              const lookupRes = await api.post("/lcsc/lookup", { items: [{ lcsc: match.lcsc, qty: 1 }] });
+              found = lookupRes.data?.items?.[0];
+              if (found) {
+                source = 'lcsc';
+                console.log(`[Auto-Enrich]   LCSC lookup OK: mpn=${found.mpn} value=${found.value} voltageRating=${found.voltageRating} tolerance=${found.tolerance} package=${found.package} price=${found.price}`);
+              }
+            } else {
+              console.log(`[Auto-Enrich]   No LCSC match found`);
+            }
+          } else if (target === 'mouser') {
+            console.log(`[Auto-Enrich] → Trying Mouser search by keyword: "${pn}"`);
+            // Throttle: enforce minimum interval between Mouser calls
+            const now = Date.now()
+            const wait = MOUSER_MIN_INTERVAL_MS - (now - lastMouserCallAt)
+            if (wait > 0) await new Promise(r => setTimeout(r, wait))
+            lastMouserCallAt = Date.now()
+            // Retry up to 3x on 502/503/429 with exponential backoff
+            let mousRes: any = null
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try {
+                if (attempt > 0) {
+                  const backoff = 2000 * Math.pow(2, attempt - 1) // 2s, 4s
+                  console.warn(`[Auto-Enrich]   Mouser retry ${attempt}/2, waiting ${backoff}ms...`)
+                  await new Promise(r => setTimeout(r, backoff))
+                }
+                mousRes = await api.post("/mouser/search", { keyword: pn, qty: 1 })
+                lastMouserCallAt = Date.now()
+                break
+              } catch (e: any) {
+                const status = e?.response?.status
+                if (status === 502 || status === 503 || status === 429) {
+                  console.warn(`[Auto-Enrich]   Mouser ${status} on attempt ${attempt + 1}`)
+                  if (attempt === 2) console.warn(`[Auto-Enrich]   Mouser giving up after 3 attempts, falling back to next supplier`)
+                } else { throw e }
+              }
+            }
+            found = mousRes?.data?.items?.[0]
+            if (found) {
+              source = 'mouser';
+              console.log(`[Auto-Enrich]   Mouser OK: mpn=${found.mpn} value=${found.value} voltageRating=${found.voltageRating} tolerance=${found.tolerance} price=${found.price}`);
+            } else {
+              console.log(`[Auto-Enrich]   Mouser: no result (quota exceeded or not found)`);
+            }
+          } else if (target === 'digikey') {
+            console.log(`[Auto-Enrich] → Trying DigiKey search by keyword: "${pn}"`);
+            const res = await api.post("/digikey/search", { keyword: pn, qty: 1 });
+            found = res.data?.items?.[0];
+            if (found) {
+              source = 'digikey';
+              console.log(`[Auto-Enrich]   DigiKey OK: mpn=${found.mpn} value=${found.value} voltageRating=${found.voltageRating} tolerance=${found.tolerance} price=${found.price}`);
+            } else {
+              console.log(`[Auto-Enrich]   DigiKey: no result`);
+            }
+          }
+        } catch (e: any) {
+          console.warn(`[Auto-Enrich]   ${target} error: ${e.message}`)
         }
       }
 
-      if (!found && pn) {
-        console.log(`[Auto-Enrich] Querying DigiKey for: ${pn}`);
-        const res = await api.post("/digikey/search", { keyword: pn, qty: 1 });
-        found = res.data?.items?.[0];
-        if (found) {
-          source = "digikey";
-          console.log(`[Auto-Enrich] Found on DigiKey: ${found.mpn}, Price: ${found.price}, Stock: ${found.quantity_available}`);
+      // Specs enrichment: found from Mouser but specs incomplete → enrich with LCSC
+      // Skip for DigiKey source — DigiKey specs call below is more authoritative
+      if (found && source === 'mouser' && !lcsc && pn && (!found.voltageRating || !found.value || !found.tolerance)) {
+        try {
+          console.log(`[Auto-Enrich] Specs incomplete from ${source}, enriching with LCSC search for: ${pn}`);
+          const searchRes = await api.post("/lcsc/search", { keyword: pn, limit: 5 });
+          const lcscItems: any[] = searchRes.data?.items ?? [];
+          const lcscMatch = lcscItems.find((r: any) =>
+            r.mpn?.toLowerCase() === (found.mpn || pn).toLowerCase()
+          ) ?? lcscItems[0];
+          if (lcscMatch?.lcsc) {
+            const lookupRes = await api.post("/lcsc/lookup", { items: [{ lcsc: lcscMatch.lcsc, qty: 1 }] });
+            const fullData = lookupRes.data?.items?.[0];
+            if (fullData) {
+              console.log(`[Auto-Enrich] LCSC enrich success for ${pn}: value=${fullData.value}, voltageRating=${fullData.voltageRating}, tolerance=${fullData.tolerance}`);
+              found = {
+                ...found,
+                value:        fullData.value        ?? found.value,
+                voltageRating: fullData.voltageRating ?? found.voltageRating,
+                tolerance:    fullData.tolerance    ?? found.tolerance,
+                package:      fullData.package      ?? found.package,
+                manufacturer: fullData.manufacturer ?? found.manufacturer,
+                category:     fullData.category     ?? found.category,
+                description:  fullData.description  ?? found.description,
+              };
+            }
+          }
+        } catch (e: any) {
+          console.warn(`[Auto-Enrich] LCSC spec enrichment failed for ${pn}:`, e.message);
         }
       }
 
       if (found) {
+        console.log(`[enrichItem] found from ${source}:`, JSON.stringify({
+          mpn: found.mpn, manufacturer: found.manufacturer, description: found.description,
+          package: found.package, category: found.category, value: found.value,
+          voltageRating: found.voltageRating, tolerance: found.tolerance,
+          price: found.price, quantity_available: found.quantity_available
+        }, null, 2));
+
+        // Specs enrichment: if source != digikey OR specs blob missing, hit /digikey/specs
+        let specsData: { specs?: string; value?: string; voltageRating?: string; tolerance?: string; package?: string } = {
+          specs: found.specs || undefined,
+          value: found.value || undefined,
+          voltageRating: found.voltageRating || undefined,
+          tolerance: found.tolerance || undefined,
+          package: found.package || undefined,
+        };
+        const mpnForSpecs = found.mpn || pn;
+        if (mpnForSpecs && (source !== 'digikey' || !found.specs)) {
+          try {
+            console.log(`[Auto-Enrich] Fetching DigiKey specs for: ${mpnForSpecs}`);
+            const dkRes = await api.post('/digikey/specs', { mpn: mpnForSpecs });
+            if (dkRes.data?.specs) {
+              specsData = {
+                specs: dkRes.data.specs,
+                value: dkRes.data.value || specsData.value,
+                voltageRating: dkRes.data.voltageRating || specsData.voltageRating,
+                tolerance: dkRes.data.tolerance || specsData.tolerance,
+                package: dkRes.data.package || specsData.package,
+              };
+              console.log(`[Auto-Enrich] DigiKey specs OK for ${mpnForSpecs}: ${Object.keys(JSON.parse(dkRes.data.specs)).length} params`);
+            }
+          } catch (e: any) {
+            console.warn(`[Auto-Enrich] DigiKey specs failed for ${mpnForSpecs}: ${e.message}`);
+          }
+        }
+
         const stockNum = found.quantity_available != null ? Number(found.quantity_available) : null;
         const spMap: any = {};
         spMap[source] = {
@@ -320,22 +625,67 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
           quantity_available: stockNum,
           priceBreaks: found.priceBreaks || []
         };
+        // Preserve unsupported supplier URLs (AliExpress, Tokopedia, etc.) alongside main supplier
+        for (const { key, url } of extraUrls) {
+          if (!spMap[key]) spMap[key] = { pn: pn, url, price: null, quantity_available: null }
+        }
 
-        console.log(`[Auto-Enrich] Updating Database for SID: ${sid} with fresh data from ${source} (Stock: ${stockNum})`);
+        // Auto-fix partNumber: kalau sekarang C-code (e.g. "C114767") tapi LCSC return MPN asli → update
+        const isCcode = (v: string) => /^C\d+$/i.test(v.trim())
+        const realMpn = found.mpn && found.mpn !== rawPn && isCcode(rawPn) && !isCcode(found.mpn) ? found.mpn : null
+        if (realMpn) console.log(`[Auto-Enrich] Updating partNumber: "${rawPn}" → "${realMpn}" (real MPN from LCSC)`)
+
+        const supplierLabel = source === 'lcsc' ? 'LCSC' : source === 'mouser' ? 'Mouser' : source === 'digikey' ? 'DigiKey' : source
+        console.log(`[Auto-Enrich] Updating Database for SID: ${sid} with fresh data from ${supplierLabel} (Stock: ${stockNum})`);
         await prisma.item.update({
           where: { stableId: sid },
           data: {
             priceMin: found.price || undefined,
             priceCurrency: "USD",
-            suppliers: source,
-            stockQty: stockNum ?? undefined, // FORCE UPDATE STOCK
-            links: (found.url && found.datasheet) ? `${found.url};${found.datasheet}` : (found.url || found.datasheet || undefined),
-            supplierPrices: JSON.stringify(spMap)
+            suppliers: supplierLabel,
+            stockQty: stockNum ?? undefined,
+            links: (() => {
+              const parts = [
+                found.url,
+                found.datasheet,
+                ...extraUrls.map(e => e.url),
+              ].filter(Boolean)
+              return parts.length ? parts.join(';') : undefined
+            })(),
+            supplierPrices: JSON.stringify(spMap),
+            // replace C-code with real MPN if found via LCSC
+            ...(realMpn ? { partNumber: realMpn } : {}),
+            // specs blob (DigiKey Parameters JSON)
+            ...(specsData.specs ? { specs: specsData.specs } : {}),
+            // fill technical fields only if currently empty
+            ...(found.description         ? { description:    found.description    } : {}),
+            ...(found.manufacturer        ? { manufacturer:   found.manufacturer   } : {}),
+            ...(found.category            ? { category:       found.category       } : {}),
+            ...(specsData.package        ? { package:        specsData.package        } : {}),
+            ...(specsData.value          ? { value:          specsData.value          } : {}),
+            ...(specsData.voltageRating  ? { voltageRating:  specsData.voltageRating  } : {}),
+            ...(specsData.tolerance      ? { tolerance:      specsData.tolerance      } : {}),
           }
         });
         return true;
       } else {
-        console.warn(`[Auto-Enrich] No data found on any supplier for: ${pn}`);
+        console.warn(`[Auto-Enrich] No data found on any supplier for: ${pn}`)
+        // Still save unsupported supplier URLs (AliExpress, Tokopedia, etc.) even when enrich fails
+        if (extraUrls.length > 0) {
+          const fallbackMap: any = {}
+          for (const { key, url } of extraUrls) {
+            fallbackMap[key] = { pn: pn, url, price: null, quantity_available: null }
+          }
+          await prisma.item.update({
+            where: { stableId: sid },
+            data: {
+              links: extraUrls.map(e => e.url).join(';'),
+              supplierPrices: JSON.stringify(fallbackMap),
+            }
+          })
+          console.log(`[Auto-Enrich] Saved ${extraUrls.length} unsupported URL(s) for: ${pn}`)
+          return true
+        }
       }
     } catch (e: any) {
       console.error(`[Auto-Enrich] Critical failure for ${pn}:`, e.message);
@@ -359,15 +709,23 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
       const sid = String(row['Stable ID'] || '').trim()
       if (!sid) continue
 
-      const pn = strOrNull(row['Part Number'])
+      const rawPn = strOrNull(row['Part Number'])
+      const legacyStockCode = strOrNull(row['Stock Code'])
+      const legacyLcscCol = strOrNull(row['LCSC Code'])
       const possibleLinks = [
         row['Link(s)'],
         row['links'],
         row['Link'],
         row['Product URL'],
-        row['Datasheet URL']
+        row['Datasheet URL'],
+        row['Remark'],
+        row['remark'],
       ].map(l => strOrNull(l)).filter(Boolean) as string[]
       const linkStr = possibleLinks.length > 0 ? Array.from(new Set(possibleLinks)).join(';') : null
+      const lcscFromUrl = possibleLinks.join(' ').match(/lcsc\.com\/[^\s"']*\/(C\d+)/i)?.[1] ?? null
+      const isLcscCode = (v: string | null) => !!v && /^C\d+$/i.test(v.trim())
+      const legacyLcsc = isLcscCode(legacyLcscCol) ? legacyLcscCol : isLcscCode(legacyStockCode) ? legacyStockCode : lcscFromUrl
+      const pn = cleanPN(rawPn, legacyStockCode ?? legacyLcsc)
 
       if (!dryRun) {
         try {
@@ -406,7 +764,7 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
           })
 
           if (autoEnrich && pn) {
-            if (await enrichItem(sid, pn)) itemsEnriched++;
+            if (await enrichItem(sid, pn, legacyLcsc || undefined, linkStr || undefined, suppliers || undefined)) itemsEnriched++;
           }
         } catch (e) { errors.push(`Legacy Item ${sid}: ${String(e)}`) }
       }
@@ -481,14 +839,22 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
         const sid = String(getVal(['Stable ID', 'stable_id', 'SID']) || '').trim();
         if (sid) {
           sheetItems.push(sid);
-          const pn = strOrNull(getVal(['Part Number', 'part_number', 'MPN']));
-          const lcsc = strOrNull(getVal(['LCSC Code', 'LcscCode', 'Stock Code', 'StockCode']));
+          const rawPn = strOrNull(getVal(['Part Number', 'part_number', 'MPN']));
+          const stockCode = strOrNull(getVal(['Stock Code', 'StockCode']));
+          const lcscColRaw = strOrNull(getVal(['LCSC Code', 'LcscCode']));
+          // Extract C-code from LCSC URL if no dedicated column (e.g. https://www.lcsc.com/product-detail/C23140.html)
+          const allLinkVals = [getVal(['Product URL', 'ProductURL']), getVal(['Link(s)', 'links', 'Link']), getVal(['Remark', 'remark', 'Remarks'])].filter(Boolean).join(' ')
+          const lcscFromUrl = allLinkVals.match(/lcsc\.com\/[^\s"']*\/(C\d+)/i)?.[1] ?? null
+          // Only use as LCSC C-code if it actually matches C-code pattern (C followed by digits)
+          const isLcscCode = (v: string | null) => !!v && /^C\d+$/i.test(v.trim())
+          const lcsc = isLcscCode(lcscColRaw) ? lcscColRaw : isLcscCode(stockCode) ? stockCode : lcscFromUrl
+          const pn = cleanPN(rawPn, stockCode ?? lcsc);
           const suppliers = strOrNull(getVal(['Supplier(s)', 'suppliers', 'Supplier']));
           const priceVal = numOrNull(getVal(['Price (min)', 'price_min', 'Price', 'UnitPrice']));
-          
+
           // Join multiple potential link columns
           const possibleLinks = [
-            getVal(['Product URL', 'ProductURL']), 
+            getVal(['Product URL', 'ProductURL']),
             getVal(['Datasheet URL', 'DatasheetURL']), 
             getVal(['Link(s)', 'links', 'Link'])
           ].filter(Boolean) as string[];
@@ -502,34 +868,81 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
                 try { JSON.parse(formattedSupPrices) } catch { formattedSupPrices = null }
               }
 
-              // SMART FIX: Reconstruct supplierPrices if missing but we have URL & Supplier Name
+              // Helper: find URL matching a specific supplier domain from combined link string
+              const findSupplierUrl = (allLinks: string | null, supKey: string): string | null => {
+                if (!allLinks) return null
+                const domainMap: Record<string, string[]> = {
+                  lcsc:    ['lcsc.com'],
+                  mouser:  ['mouser.com', 'mouser.co'],
+                  digikey: ['digikey.com', 'digikey.co'],
+                  tokopedia: ['tokopedia.com'],
+                  aliexpress: ['aliexpress.com', 'aliexpress.us'],
+                  waveshare: ['waveshare.com'],
+                }
+                const domains = domainMap[supKey] ?? []
+                const urls = allLinks.split(/[;\s]+/).map(u => u.trim()).filter(Boolean)
+                for (const domain of domains) {
+                  const match = urls.find(u => u.toLowerCase().includes(domain))
+                  if (match) return match
+                }
+                return urls[0] ?? null // fallback: first URL
+              }
+
+              // Reconstruct supplierPrices — use normalizeSupplier() for accurate matching (handles "Digi-Key" etc.)
               if (!formattedSupPrices && pn && suppliers) {
-                const mainSup = suppliers.split(/[;,]/)[0].trim().toLowerCase();
-                const knownSups = ['lcsc', 'mouser', 'digikey'];
-                const matchedSup = knownSups.find(ks => mainSup.includes(ks));
-                if (matchedSup) {
-                  const rawUrl = strOrNull(getVal(['Product URL', 'Link(s)', 'Link']));
-                  const cleanUrl = rawUrl ? rawUrl.split(/[;,\s]/)[0].trim() : null; // Only first URL
-                  const spMap: any = {};
-                  spMap[matchedSup] = {
-                    pn: (matchedSup === 'lcsc' ? lcsc : pn) || pn,
-                    url: cleanUrl,
-                    price: priceVal,
-                    quantity_available: numOrNull(getVal(['Stock Qty', 'stock_qty']))
-                  };
-                  formattedSupPrices = JSON.stringify(spMap);
+                const allLinksRaw = [
+                  strOrNull(getVal(['Product URL', 'ProductURL'])),
+                  strOrNull(getVal(['Link(s)', 'links', 'Link'])),
+                  strOrNull(getVal(['Datasheet URL', 'DatasheetURL'])),
+                ].filter(Boolean).join(';')
+
+                // Try each supplier listed (e.g. "Digi-Key; Mouser")
+                const supplierList = suppliers.split(/[;,]/).map(s => s.trim()).filter(Boolean)
+                const spMap: any = {}
+                for (const sup of supplierList) {
+                  const supKey = normalizeSupplier(sup)
+                  if (supKey) {
+                    const supplierUrl = findSupplierUrl(allLinksRaw, supKey)
+                    spMap[supKey] = {
+                      pn: (supKey === 'lcsc' ? lcsc : pn) || pn,
+                      url: supplierUrl,
+                      price: priceVal,
+                      quantity_available: numOrNull(getVal(['Stock Qty', 'stock_qty']))
+                    }
+                  } else {
+                    // Unsupported supplier (Tokopedia, AliExpress, etc.) — save URL as-is
+                    const supKeyRaw = sup.toLowerCase().replace(/[^a-z0-9]/g, '')
+                    const supplierUrl = findSupplierUrl(allLinksRaw, supKeyRaw) ?? allLinksRaw.split(';')[0]?.trim() ?? null
+                    if (supplierUrl) {
+                      spMap[supKeyRaw] = { pn: pn, url: supplierUrl, price: priceVal, quantity_available: null }
+                    }
+                  }
+                }
+                if (Object.keys(spMap).length > 0) {
+                  formattedSupPrices = JSON.stringify(spMap)
                 }
               }
+
+              // Issue #4 & #5: Extract Value/Package from Description as fallback
+              const descRaw = strOrNull(getVal(['Description', 'description', 'Description2']))
+              const descExtracted = extractFromDescription(descRaw)
+
+              // Issue #6: Validate Value — reject garbage (part numbers, IDs, product names)
+              const rawValue = strOrNull(getVal(['Value (canonical)', 'value', 'Value']))
+              const cleanValue = isValidValue(rawValue) ? rawValue : (descExtracted.value ?? null)
+
+              const rawPackage = strOrNull(getVal(['Package (canonical)', 'package', 'Footprint']))
+              const cleanPackage = rawPackage || descExtracted.package
 
               await prisma.item.upsert({
                 where: { stableId: sid },
                 update: {
                   partNumber: pn,
                   productName: strOrNull(getVal(['Product Name', 'product_name', 'Description'])),
-                  value: strOrNull(getVal(['Value (canonical)', 'value', 'Value'])),
-                  description: strOrNull(getVal(['Description', 'description', 'Description2'])),
+                  value: cleanValue,
+                  description: descRaw,
                   category: strOrNull(getVal(['Category', 'category'])),
-                  package: strOrNull(getVal(['Package (canonical)', 'package', 'Footprint'])),
+                  package: cleanPackage,
                   manufacturer: strOrNull(getVal(['Manufacturer', 'manufacturer'])),
                   suppliers: suppliers,
                   stockCode: lcsc,
@@ -546,10 +959,10 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
                   stableId: sid,
                   partNumber: pn,
                   productName: strOrNull(getVal(['Product Name', 'product_name', 'Description'])),
-                  value: strOrNull(getVal(['Value (canonical)', 'value', 'Value'])),
-                  description: strOrNull(getVal(['Description', 'description', 'Description2'])),
+                  value: cleanValue,
+                  description: descRaw,
                   category: strOrNull(getVal(['Category', 'category'])),
-                  package: strOrNull(getVal(['Package (canonical)', 'package', 'Footprint'])),
+                  package: cleanPackage,
                   manufacturer: strOrNull(getVal(['Manufacturer', 'manufacturer'])),
                   suppliers: suppliers,
                   stockCode: lcsc,
@@ -566,7 +979,7 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
 
               // AGGRESSIVE ENRICHMENT: If autoEnrich is ON, always prioritize internet data for stock & price
               if (autoEnrich) {
-                if (await enrichItem(sid, pn || '', lcsc || undefined)) itemsEnriched++;
+                if (await enrichItem(sid, rawPn || '', lcsc || undefined, linkStr || undefined, suppliers || undefined, stockCode || undefined)) itemsEnriched++;
               }
             } catch (e) { errors.push(`Item ${sid}: ${String(e)}`) }
           }
@@ -853,7 +1266,7 @@ admin.get('/settings', requireRole('admin', 'super'), async (c) => {
   return c.json(out)
 })
 
-admin.patch('/settings', requireRole('super'), async (c) => {
+admin.patch('/settings', requireRole('admin', 'super'), async (c) => {
   try {
     const data = await c.req.json() as Record<string, string>
     const user = c.get('user')
@@ -884,6 +1297,65 @@ admin.patch('/settings', requireRole('super'), async (c) => {
     console.error('[Admin Settings] Error updating settings:', err)
     return c.json({ error: err.message || 'Internal Server Error' }, 500)
   }
+})
+
+// ─── API Keys (super only) ─────────────────────────────────────────────────
+
+function maskKey(val: string | undefined): string {
+  if (!val) return ''
+  if (val.length <= 4) return '****'
+  return '****' + val.slice(-4)
+}
+
+admin.get('/api-keys', requireRole('super'), async (c) => {
+  const rows = await prisma.systemSetting.findMany({
+    where: { key: { in: ['api_mouser_key', 'api_digikey_client_id', 'api_digikey_client_secret'] } }
+  })
+  const db: Record<string, string> = {}
+  rows.forEach(r => { db[r.key] = r.value })
+
+  const mouserSrc  = db['api_mouser_key']           ? 'db' : (process.env.MOUSER_API_KEY          ? 'env' : 'none')
+  const dkIdSrc    = db['api_digikey_client_id']    ? 'db' : (process.env.DIGIKEY_CLIENT_ID        ? 'env' : 'none')
+  const dkSecSrc   = db['api_digikey_client_secret']? 'db' : (process.env.DIGIKEY_CLIENT_SECRET    ? 'env' : 'none')
+
+  return c.json({
+    mouserKey:           maskKey(db['api_mouser_key']            || process.env.MOUSER_API_KEY),
+    digikeyClientId:     maskKey(db['api_digikey_client_id']     || process.env.DIGIKEY_CLIENT_ID),
+    digikeyClientSecret: maskKey(db['api_digikey_client_secret'] || process.env.DIGIKEY_CLIENT_SECRET),
+    sources: { mouser: mouserSrc, digikeyId: dkIdSrc, digikeySecret: dkSecSrc },
+  })
+})
+
+admin.put('/api-keys', requireRole('super'), async (c) => {
+  const { mouserKey, digikeyClientId, digikeyClientSecret, confirmPassword } = await c.req.json()
+  if (!confirmPassword) return c.json({ error: 'confirmPassword required' }, 400)
+
+  const user = c.get('user')
+  const dbUser = await prisma.user.findUnique({ where: { id: user.id } })
+  if (!dbUser || !(await verifyPassword(confirmPassword, dbUser.passwordHash))) {
+    return c.json({ error: 'Password incorrect' }, 401)
+  }
+
+  const updates: { key: string; value: string }[] = []
+  if (mouserKey?.trim())           updates.push({ key: 'api_mouser_key',            value: mouserKey.trim() })
+  if (digikeyClientId?.trim())     updates.push({ key: 'api_digikey_client_id',     value: digikeyClientId.trim() })
+  if (digikeyClientSecret?.trim()) updates.push({ key: 'api_digikey_client_secret', value: digikeyClientSecret.trim() })
+
+  if (updates.length === 0) return c.json({ error: 'No keys provided' }, 400)
+
+  for (const { key, value } of updates) {
+    await prisma.systemSetting.upsert({
+      where: { key },
+      update: { value },
+      create: { key, value },
+    })
+    await logChange({ entity: 'system', entityId: 'api-keys', field: key, oldValue: '****', newValue: '****', changedBy: user.username, context: 'API Key updated via Configure page' })
+  }
+
+  const digikeyChanged = updates.some(u => u.key.startsWith('api_digikey'))
+  if (digikeyChanged) clearDigikeyTokenCache()
+
+  return c.json({ ok: true, updated: updates.map(u => u.key) })
 })
 
 // ─── Backup export ─────────────────────────────────────────────────────────
@@ -929,9 +1401,286 @@ function strOrNull(v: unknown): string | null {
   return s === '' ? null : s
 }
 
+// Strip supplier catalog prefix (e.g. "187-CL21A106" → "CL21A106")
+// If stockCode (actual MPN) is provided and non-empty, use it directly.
+// Otherwise strip the leading digits+dash prefix.
+function cleanPN(pn: string | null, stockCode?: string | null): string | null {
+  if (!pn) return pn
+  // Strip numeric supplier prefixes: "187-CL21..." → "CL21..."
+  const numericPrefix = pn.match(/^\d{3,5}-(.+)/)
+  if (numericPrefix) {
+    if (stockCode?.trim()) return stockCode.trim()
+    return numericPrefix[1].trim() || pn
+  }
+  // Strip ALT- prefix: "ALT-C42411287" → use stockCode if available
+  const altPrefix = pn.match(/^ALT-(.+)/i)
+  if (altPrefix) {
+    if (stockCode?.trim()) return stockCode.trim()
+    return altPrefix[1].trim() || pn
+  }
+  return pn
+}
+
 function numOrNull(v: unknown): number | null {
   const n = Number(v)
   return isNaN(n) || v === '' ? null : n
 }
+
+// ─── Price Sync Job Store ────────────────────────────────────────────────────
+
+type JobStatus = {
+  status: 'running' | 'done' | 'error'
+  mode: 'all' | 'missing'
+  total: number
+  done: number
+  updated: number
+  failed: number
+  startedAt: number
+  finishedAt?: number
+  error?: string
+}
+
+const priceJobs = new Map<string, JobStatus>()
+
+let _serviceToken: string | null = null
+async function getServiceToken() {
+  if (!_serviceToken) {
+    _serviceToken = await signToken({ id: 0, username: 'service', role: 'super' })
+  }
+  return _serviceToken
+}
+
+let _standaloneLastMouserAt = 0
+const STANDALONE_MOUSER_INTERVAL_MS = 600
+
+async function enrichItemStandalone(sid: string, rawPn: string, lcsc?: string): Promise<boolean> {
+  const pn = cleanPN(rawPn, lcsc) ?? rawPn
+  const base = `http://localhost:${process.env.PORT || 8001}`
+  const token = await getServiceToken()
+  const headers = { Authorization: `Bearer ${token}` }
+
+  // Read existing supplierPrices from DB to preserve non-enrichable entries (AliExpress etc.)
+  // and to detect preferred supplier
+  const existing = await prisma.item.findUnique({
+    where: { stableId: sid },
+    select: { suppliers: true, supplierPrices: true }
+  })
+  const existingSpMap: Record<string, any> = (() => {
+    try { return existing?.supplierPrices ? JSON.parse(existing.supplierPrices as string) : {} } catch { return {} }
+  })()
+  // Non-enrichable keys to preserve (AliExpress, Tokopedia, etc.)
+  const knownSuppliers = new Set(['lcsc', 'mouser', 'digikey'])
+  const preservedEntries: Record<string, any> = {}
+  for (const [k, v] of Object.entries(existingSpMap)) {
+    if (!knownSuppliers.has(k)) preservedEntries[k] = v
+  }
+
+  // Determine search order from existing suppliers field in DB
+  type SearchTarget = 'lcsc' | 'mouser' | 'digikey'
+  const dbSupplier = existing?.suppliers?.toLowerCase().replace(/[^a-z]/g, '') ?? ''
+  const preferred: SearchTarget | null = dbSupplier.includes('digikey') ? 'digikey'
+    : dbSupplier.includes('mouser') ? 'mouser'
+    : dbSupplier.includes('lcsc') ? 'lcsc'
+    : null
+  const order: SearchTarget[] = preferred === 'digikey' ? ['digikey', 'mouser']
+    : preferred === 'mouser' ? ['mouser', 'digikey']
+    : preferred === 'lcsc' ? ['lcsc', 'mouser', 'digikey']
+    : ['lcsc', 'mouser', 'digikey']
+
+  try {
+    let found: any = null
+    let source = ''
+
+    // LCSC by C-code first if available
+    if (lcsc) {
+      try {
+        const res = await axios.post(`${base}/lcsc/lookup`, { items: [{ lcsc, qty: 1 }] }, { headers })
+        found = res.data?.items?.[0]
+        if (found) source = 'lcsc'
+      } catch {}
+    }
+
+    // Search by MPN following preferred order
+    for (const target of order) {
+      if (found) break
+      if (!pn) continue
+      try {
+        if (target === 'lcsc') {
+          const searchRes = await axios.post(`${base}/lcsc/search`, { keyword: pn, limit: 5 }, { headers })
+          const lcscItems: any[] = searchRes.data?.items ?? []
+          const match = lcscItems.find((r: any) => r.mpn?.toLowerCase() === pn.toLowerCase()) ?? lcscItems[0]
+          if (match?.lcsc) {
+            const lookupRes = await axios.post(`${base}/lcsc/lookup`, { items: [{ lcsc: match.lcsc, qty: 1 }] }, { headers })
+            found = lookupRes.data?.items?.[0]
+            if (found) source = 'lcsc'
+          }
+        } else if (target === 'mouser') {
+          // Throttle Mouser: 600ms minimum interval
+          const now = Date.now()
+          const wait = STANDALONE_MOUSER_INTERVAL_MS - (now - _standaloneLastMouserAt)
+          if (wait > 0) await new Promise(r => setTimeout(r, wait))
+          _standaloneLastMouserAt = Date.now()
+          // Retry 3x on 502/503/429
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * Math.pow(2, attempt - 1)))
+              const res = await axios.post(`${base}/mouser/search`, { keyword: pn, qty: 1 }, { headers })
+              _standaloneLastMouserAt = Date.now()
+              found = res.data?.items?.[0]
+              if (found) source = 'mouser'
+              break
+            } catch (e: any) {
+              const s = e?.response?.status
+              if (s === 502 || s === 503 || s === 429) { if (attempt === 2) break }
+              else throw e
+            }
+          }
+        } else if (target === 'digikey') {
+          const res = await axios.post(`${base}/digikey/search`, { keyword: pn, qty: 1 }, { headers })
+          found = res.data?.items?.[0]
+          if (found) source = 'digikey'
+        }
+      } catch {}
+    }
+
+    // Specs enrichment: Mouser source + incomplete → try LCSC
+    if (found && source === 'mouser' && !lcsc && pn && (!found.voltageRating || !found.value || !found.tolerance)) {
+      try {
+        const searchRes = await axios.post(`${base}/lcsc/search`, { keyword: pn, limit: 5 }, { headers })
+        const lcscItems: any[] = searchRes.data?.items ?? []
+        const lcscMatch = lcscItems.find((r: any) => r.mpn?.toLowerCase() === (found.mpn || pn).toLowerCase()) ?? lcscItems[0]
+        if (lcscMatch?.lcsc) {
+          const lookupRes = await axios.post(`${base}/lcsc/lookup`, { items: [{ lcsc: lcscMatch.lcsc, qty: 1 }] }, { headers })
+          const fullData = lookupRes.data?.items?.[0]
+          if (fullData) {
+            found = {
+              ...found,
+              value:         fullData.value         ?? found.value,
+              voltageRating: fullData.voltageRating  ?? found.voltageRating,
+              tolerance:     fullData.tolerance      ?? found.tolerance,
+              package:       fullData.package        ?? found.package,
+              manufacturer:  fullData.manufacturer   ?? found.manufacturer,
+              category:      fullData.category       ?? found.category,
+              description:   fullData.description    ?? found.description,
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // DigiKey specs enrichment (if not already from DigiKey or specs missing)
+    let specsData: { specs?: string; value?: string; voltageRating?: string; tolerance?: string; package?: string } = {
+      specs: found?.specs || undefined,
+      value: found?.value || undefined,
+      voltageRating: found?.voltageRating || undefined,
+      tolerance: found?.tolerance || undefined,
+      package: found?.package || undefined,
+    }
+    if (found) {
+      const mpnForSpecs = found.mpn || pn
+      if (mpnForSpecs && (source !== 'digikey' || !found.specs)) {
+        try {
+          const dkRes = await axios.post(`${base}/digikey/specs`, { mpn: mpnForSpecs }, { headers })
+          if (dkRes.data?.specs) {
+            specsData = {
+              specs: dkRes.data.specs,
+              value: dkRes.data.value || specsData.value,
+              voltageRating: dkRes.data.voltageRating || specsData.voltageRating,
+              tolerance: dkRes.data.tolerance || specsData.tolerance,
+              package: dkRes.data.package || specsData.package,
+            }
+          }
+        } catch {}
+      }
+    }
+
+    if (found) {
+      const stockNum = found.quantity_available != null ? Number(found.quantity_available) : null
+      const supplierLabel = source === 'lcsc' ? 'LCSC' : source === 'mouser' ? 'Mouser' : source === 'digikey' ? 'DigiKey' : source
+      // Merge: preserve non-enrichable entries, add/update the found supplier
+      const spMap: Record<string, any> = { ...preservedEntries }
+      spMap[source] = {
+        pn: (source === 'lcsc' ? lcsc : found.mpn) || pn,
+        price: found.price || null,
+        url: found.url || null,
+        quantity_available: stockNum,
+        priceBreaks: found.priceBreaks || []
+      }
+      // Build links: supplier URL + datasheet + preserved unsupported URLs
+      const linkParts = [
+        found.url,
+        found.datasheet,
+        ...Object.values(preservedEntries).map((e: any) => e.url).filter(Boolean),
+      ].filter(Boolean) as string[]
+      await prisma.item.update({
+        where: { stableId: sid },
+        data: {
+          priceMin: found.price || undefined,
+          priceCurrency: 'USD',
+          suppliers: supplierLabel,
+          stockQty: stockNum ?? undefined,
+          links: linkParts.length ? linkParts.join(';') : undefined,
+          supplierPrices: JSON.stringify(spMap),
+          ...(specsData.specs        ? { specs:         specsData.specs        } : {}),
+          ...(found.description      ? { description:   found.description      } : {}),
+          ...(specsData.package      ? { package:       specsData.package      } : found.package ? { package: found.package } : {}),
+          ...(found.manufacturer     ? { manufacturer:  found.manufacturer     } : {}),
+          ...(found.category         ? { category:      found.category         } : {}),
+          ...(specsData.value        ? { value:         specsData.value        } : found.value ? { value: found.value } : {}),
+          ...(specsData.voltageRating ? { voltageRating: specsData.voltageRating } : found.voltageRating ? { voltageRating: found.voltageRating } : {}),
+          ...(specsData.tolerance    ? { tolerance:     specsData.tolerance    } : found.tolerance ? { tolerance: found.tolerance } : {}),
+        }
+      })
+      return true
+    }
+  } catch {}
+  return false
+}
+
+admin.post('/refresh-prices', requireRole('admin', 'super'), async (c) => {
+  const { mode = 'missing' } = await c.req.json<{ mode?: 'all' | 'missing' }>().catch(() => ({ mode: 'missing' as const }))
+
+  const where = mode === 'missing'
+    ? { OR: [{ priceMin: null }, { priceMin: 0 }] }
+    : {}
+
+  const items = await prisma.item.findMany({
+    where,
+    select: { stableId: true, partNumber: true, stockCode: true }
+  })
+
+  const jobId = `job_${Date.now()}`
+  const job: JobStatus = {
+    status: 'running',
+    mode,
+    total: items.length,
+    done: 0,
+    updated: 0,
+    failed: 0,
+    startedAt: Date.now()
+  }
+  priceJobs.set(jobId, job)
+
+  // Run in background — do not await
+  ;(async () => {
+    for (const item of items) {
+      const ok = await enrichItemStandalone(item.stableId, item.partNumber || '', item.stockCode || undefined)
+      job.done++
+      if (ok) job.updated++; else job.failed++
+    }
+    job.status = 'done'
+    job.finishedAt = Date.now()
+    // Clean up after 10 minutes
+    setTimeout(() => priceJobs.delete(jobId), 10 * 60 * 1000)
+  })()
+
+  return c.json({ jobId, total: items.length })
+})
+
+admin.get('/refresh-prices/:jobId', requireRole('admin', 'super'), async (c) => {
+  const job = priceJobs.get(c.req.param('jobId'))
+  if (!job) return c.json({ error: 'Job not found' }, 404)
+  return c.json(job)
+})
 
 export default admin

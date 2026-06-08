@@ -158,6 +158,7 @@ export function AddItemSearchModal({ onClose, onCreated }: {
 
   const [form, setForm] = useState<Partial<Item>>({ priceCurrency: 'USD' })
   const [saveError, setSaveError] = useState('')
+  const [lcscDeepLoading, setLcscDeepLoading] = useState(false)
 
   const stateOf = useCallback((src: 'lcsc' | 'mouser' | 'digikey') => {
     return src === 'lcsc' ? lcsc : src === 'mouser' ? mouser : digikey
@@ -202,7 +203,10 @@ export function AddItemSearchModal({ onClose, onCreated }: {
 
     // If picking from LCSC and it's from search (shallow data), try to get deep data if possible
     if (src === 'lcsc' && result.lcsc && !result.value) {
-      // Perform a silent deep lookup to get parameters/specs
+      // Set shallow data immediately so UI reflects selection
+      setSelected(prev => ({ ...prev, lcsc: result }))
+      // Deep lookup for full specs (voltageRating, tolerance, value from parameters)
+      setLcscDeepLoading(true)
       api.post('/lcsc/lookup', { items: [{ lcsc: result.lcsc }] })
         .then(res => {
           const deepItem = res.data?.items?.[0]
@@ -211,13 +215,10 @@ export function AddItemSearchModal({ onClose, onCreated }: {
               ...prev,
               lcsc: { ...result, ...deepItem, source: 'lcsc' }
             }))
-          } else {
-            setSelected(prev => ({ ...prev, lcsc: result }))
           }
         })
-        .catch(() => {
-          setSelected(prev => ({ ...prev, lcsc: result }))
-        })
+        .catch(() => { /* keep shallow data */ })
+        .finally(() => setLcscDeepLoading(false))
     } else {
       setSelected(prev => ({ ...prev, [src]: result }))
     }
@@ -249,6 +250,8 @@ export function AddItemSearchModal({ onClose, onCreated }: {
     
     // specSource: find the source that actually has technical specs
     const specSource = allSelected.find(r => r.value || r.tolerance || r.package || r.voltageRating) ?? best
+    // specsBlob: DigiKey search result already has full specs JSON
+    const specsBlob = allSelected.find(r => r.specs)?.specs ?? null
 
     // Data Merging Logic:
     // 1. Description: Pick the longest one available
@@ -260,19 +263,19 @@ export function AddItemSearchModal({ onClose, onCreated }: {
     const bestCat = allCats.sort((a, b) => b.length - a.length)[0] || metaSource?.category || ''
 
     // 3. Datasheet: Prefer PDF links
-    const datasheet = allSelected.find(r => r.datasheet?.toLowerCase().includes('.pdf'))?.datasheet 
-      || allSelected.find(r => r.datasheet)?.datasheet 
-      || best?.datasheet 
-      || best?.url 
+    const datasheet = allSelected.find(r => r.datasheet?.toLowerCase().includes('.pdf'))?.datasheet
+      || allSelected.find(r => r.datasheet)?.datasheet
+      || best?.datasheet
+      || best?.url
       || ''
 
     const prices = allSelected.map(r => r.price).filter((p): p is number => p != null)
     const minPrice = prices.length ? Math.min(...prices) : undefined
     const supplierNames = ALL_SOURCES.filter(s => selected[s]).map(s => SOURCE_LABELS[s]).join(';')
-    
+
     // Prefer actual MPN from supplier result over user-typed input (user may type a C-code like C9807)
     const resolvedMpn = best?.mpn?.trim() || mpn.trim()
-    
+
     setForm({
       priceCurrency: 'USD',
       stableId: genStableId(resolvedMpn),
@@ -287,6 +290,7 @@ export function AddItemSearchModal({ onClose, onCreated }: {
       voltageRating: specSource?.voltageRating || '',
       tolerance: specSource?.tolerance || '',
       package: specSource?.package || '',
+      specs: specsBlob,
     })
     setStep('details')
   }
@@ -295,12 +299,27 @@ export function AddItemSearchModal({ onClose, onCreated }: {
     setSaveError('')
     if (!form.stableId?.trim()) { setSaveError('Stable ID is required'); return }
     if (!form.partNumber?.trim()) { setSaveError('Part Number is required'); return }
+
+    // Enrich specs from DigiKey if not already present (e.g. only Mouser selected)
+    let specsToSave = form.specs ?? null
+    if (!specsToSave && !selected.digikey && form.partNumber) {
+      try {
+        const dkRes = await api.post('/digikey/specs', { mpn: form.partNumber })
+        if (dkRes.data?.specs) {
+          specsToSave = dkRes.data.specs
+          // Also fill individual fields if still empty
+          if (!form.voltageRating && dkRes.data.voltageRating) setForm(f => ({ ...f, voltageRating: dkRes.data.voltageRating }))
+          if (!form.value && dkRes.data.value) setForm(f => ({ ...f, value: dkRes.data.value }))
+          if (!form.package && dkRes.data.package) setForm(f => ({ ...f, package: dkRes.data.package }))
+          if (!form.tolerance && dkRes.data.tolerance) setForm(f => ({ ...f, tolerance: dkRes.data.tolerance }))
+        }
+      } catch { /* non-fatal */ }
+    }
+
     const spMap: SupplierPricesMap = {}
     for (const src of ALL_SOURCES) {
       const r = selected[src]
       if (r) {
-        // For LCSC: store C-code (r.lcsc) as pn so Price Lookup can find it later
-        // For others: store MPN
         const pnToStore = src === 'lcsc' ? (r.lcsc ?? r.mpn ?? null) : (r.mpn ?? null)
         const entry: SupplierPnEntry = {
           pn: pnToStore,
@@ -316,6 +335,7 @@ export function AddItemSearchModal({ onClose, onCreated }: {
     }
     const payload: Partial<Item> = {
       ...form,
+      specs: specsToSave,
       supplierPrices: Object.keys(spMap).length ? JSON.stringify(spMap) : undefined,
     }
     try {
@@ -682,7 +702,7 @@ export function AddItemSearchModal({ onClose, onCreated }: {
                 </button>
                 <button
                   onClick={handleProceedToDetails}
-                  disabled={!anySelected && !anyApiResults}
+                  disabled={(!anySelected && !anyApiResults) || lcscDeepLoading}
                   className={cn(
                     'px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md font-medium',
                     '[@media(hover:hover)]:hover:opacity-90',
@@ -691,8 +711,8 @@ export function AddItemSearchModal({ onClose, onCreated }: {
                     'flex items-center gap-1',
                   )}
                 >
-                  {anySearchRunning && <RefreshCw size={11} className="animate-spin" />}
-                  Continue <ChevronRight size={13} />
+                  {(anySearchRunning || lcscDeepLoading) && <RefreshCw size={11} className="animate-spin" />}
+                  {lcscDeepLoading ? 'Loading specs...' : 'Continue'} <ChevronRight size={13} />
                 </button>
               </div>
             </div>

@@ -111,13 +111,19 @@ interface SupplierData {
   manufacturer?: string;
   description?: string;
   price?: number | null;
+  moq?: number | null;
+  priceBreaks?: any[] | null;
   package?: string | null;
   category?: string | null;
   value?: string | null;
+  voltageRating?: string | null;
+  tolerance?: string | null;
   source?: string;
   url?: string | null;
   datasheet?: string | null;
+  availability?: string | null;
   quantity_available?: number | null;
+  specs?: string | null;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -132,6 +138,12 @@ interface MissingItemState {
 }
 
 // ─── Constants & Helpers ──────────────────────────────────────────────────
+
+function genStableId(mpn: string): string {
+  const slug = mpn.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 8)
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase()
+  return `${slug}-${rand}`
+}
 
 const SUPPLIER_BADGE: Record<string, string> = {
   lcsc:    'border-blue-200   bg-blue-50   text-blue-700   dark:border-blue-800   dark:bg-blue-950/40   dark:text-blue-300',
@@ -734,65 +746,129 @@ function ImportBomModal({ productId, productName, onClose }: ImportBomModalProps
       setMissingItems(missing);
       setStep(3);
 
+      const detectSupplier = (url: string): "lcsc" | "mouser" | "digikey" | null => {
+        const u = url.toLowerCase();
+        if (u.includes("lcsc") || u.includes("jlcpcb") || /_C\d+\.html/i.test(u)) return "lcsc";
+        if (u.includes("mouser")) return "mouser";
+        if (u.includes("digikey")) return "digikey";
+        return null;
+      };
+
       // Auto-search suppliers for each missing item
-      // Priority: LCSC by C-code → Mouser by resolvedMpn → Mouser by identifier
       for (const item of result.notFound) {
+        const targetSupplier = detectSupplier(item.url || "");
+        console.log(`[PCB Search] identifier=${item.identifier} targetSupplier=${targetSupplier || 'none'} lcscCode=${item.lcscCode || 'none'} resolvedMpn=${item.resolvedMpn || 'none'}`)
+        
         try {
           let found = null;
-          let source = "mouser";
+          let source = "";
 
-          if (item.lcscCode) {
-            // Has LCSC C-code — use LCSC sidecar
-            const res = await api.post("/lcsc/lookup", { items: [{ lcsc: item.lcscCode, qty: item.qty }] });
-            found = res.data?.items?.[0];
-            source = "lcsc";
-          }
+          const searchPn = item.resolvedMpn || item.identifier;
 
-          if (!found) {
-            // Try Mouser with resolvedMpn (from description column) or original identifier
-            // Use 'keyword' instead of 'pn' to allow smart fallback search in backend
-            const searchPn = item.resolvedMpn || item.identifier;
+          // Helper for LCSC Deep Lookup
+          const doLcscLookup = async (code: string) => {
+            console.log(`[PCB Search] → LCSC lookup by C-code: ${code}`)
+            const res = await api.post("/lcsc/lookup", { items: [{ lcsc: code, qty: item.qty }] });
+            return res.data?.items?.[0];
+          };
+
+          // 1. If supplier is detected OR we have a clear LCSC code, prioritize that
+          if (targetSupplier === "lcsc" || item.lcscCode) {
+            const code = item.lcscCode || (item.url ? (item.url.match(/_(C\d+)\.html/i)?.[1]) : null);
+            if (code) {
+              found = await doLcscLookup(code);
+              if (found) source = "lcsc";
+            }
+            
+            if (!found) {
+              console.log(`[PCB Search] → LCSC keyword search: "${searchPn}"`)
+              const res = await api.post("/lcsc/search", { keyword: searchPn, limit: 5 });
+              const lcscMatch = res.data?.items?.find((r: any) => r.mpn?.toLowerCase() === searchPn.toLowerCase()) || res.data?.items?.[0];
+              if (lcscMatch?.lcsc) {
+                found = await doLcscLookup(lcscMatch.lcsc);
+                if (found) source = "lcsc";
+              }
+            }
+          } 
+          else if (targetSupplier === "mouser") {
+            console.log(`[PCB Search] → Targeted Mouser search: "${searchPn}"`)
             const res = await api.post("/mouser/search", { keyword: searchPn, qty: item.qty });
             found = res.data?.items?.[0];
-            source = "mouser";
-          }
-
-          if (!found) {
-            // Try DigiKey as third fallback
-            const searchPn = item.resolvedMpn || item.identifier;
+            if (found) source = "mouser";
+          } 
+          else if (targetSupplier === "digikey") {
+            console.log(`[PCB Search] → Targeted DigiKey search: "${searchPn}"`)
             const res = await api.post("/digikey/search", { keyword: searchPn, qty: item.qty });
             found = res.data?.items?.[0];
-            source = "digikey";
+            if (found) source = "digikey";
+          }
+
+          // 2. Fallback to sequential search if not found or no target detected
+          if (!found) {
+            console.log(`[PCB Search] → No result from target or no target detected, falling back to sequential search...`)
+            
+            // Try LCSC first (best data)
+            if (!found) {
+              const res = await api.post("/lcsc/search", { keyword: searchPn, limit: 5 });
+              const lcscMatch = res.data?.items?.[0];
+              if (lcscMatch?.lcsc) {
+                found = await doLcscLookup(lcscMatch.lcsc);
+                if (found) source = "lcsc";
+              }
+            }
+
+            // Try Mouser
+            if (!found) {
+              const res = await api.post("/mouser/search", { keyword: searchPn, qty: item.qty });
+              found = res.data?.items?.[0];
+              if (found) source = "mouser";
+            }
+
+            // Try DigiKey
+            if (!found) {
+              const res = await api.post("/digikey/search", { keyword: searchPn, qty: item.qty });
+              found = res.data?.items?.[0];
+              if (found) source = "digikey";
+            }
           }
 
           if (found) {
+            console.log(`[PCB Search] ✓ Final result for ${item.identifier}: source=${source} mpn=${found.mpn} value=${found.value} voltageRating=${found.voltageRating} tolerance=${found.tolerance} package=${found.package}`)
             setMissingItems(prev => prev.map(m =>
               m.identifier === item.identifier
                 ? { 
                     ...m, 
                     status: "found", 
-                    supplierData: { 
-                      mpn: found.mpn, 
-                      manufacturer: found.manufacturer, 
-                      description: found.description, 
-                      price: found.price, 
-                      package: found.package, 
-                      category: found.category, 
-                      value: found.value, 
+                    supplierData: {
+                      mpn: found.mpn,
+                      manufacturer: found.manufacturer,
+                      description: found.description,
+                      price: found.price,
+                      moq: found.moq,
+                      priceBreaks: found.priceBreaks,
+                      package: found.package,
+                      category: found.category,
+                      value: found.value,
+                      voltageRating: found.voltageRating,
+                      tolerance: found.tolerance,
                       source,
                       url: found.url,
                       datasheet: found.datasheet,
-                      quantity_available: found.quantity_available
-                    } 
+                      availability: found.availability,
+                      quantity_available: found.quantity_available,
+                      specs: found.specs ?? null,
+                    }
                   }
                 : m
             ));
           } else {
+            console.log(`[PCB Search] ✗ No result found for ${item.identifier}`)
             setMissingItems(prev => prev.map(m =>
               m.identifier === item.identifier ? { ...m, status: "not_found" } : m
             ));
           }
-        } catch {
+        } catch (e: any) {
+          console.error(`[PCB Search] Error for ${item.identifier}:`, e);
           setMissingItems(prev => prev.map(m =>
             m.identifier === item.identifier ? { ...m, status: "not_found" } : m
           ));
@@ -805,17 +881,50 @@ function ImportBomModal({ productId, productName, onClose }: ImportBomModalProps
 
   async function addItemToDb(item: MissingItemState): Promise<string | null> {
     if (!item.supplierData) return null;
+    console.log('[PCB addItemToDb] supplierData full:', JSON.stringify(item.supplierData, null, 2));
+
+    const pn = item.supplierData.mpn || item.identifier;
+
+    // Declared outside try so catch block can access for 409 patch
+    let enrichedSpecs: { specs?: string | null; value?: string | null; voltageRating?: string | null; tolerance?: string | null; package?: string | null } = {
+      specs: item.supplierData.specs,
+      value: item.supplierData.value,
+      voltageRating: item.supplierData.voltageRating,
+      tolerance: item.supplierData.tolerance,
+      package: item.supplierData.package,
+    };
+    const specsEmpty = !item.supplierData.specs;
+    if (specsEmpty && item.supplierData.source !== 'digikey' && pn) {
+      try {
+        const dkRes = await api.post('/digikey/specs', { mpn: pn });
+        if (dkRes.data?.specs) {
+          enrichedSpecs = {
+            specs: dkRes.data.specs,
+            value: dkRes.data.value || item.supplierData.value,
+            voltageRating: dkRes.data.voltageRating || item.supplierData.voltageRating,
+            tolerance: dkRes.data.tolerance || item.supplierData.tolerance,
+            package: dkRes.data.package || item.supplierData.package,
+          };
+          console.log('[PCB addItemToDb] Enriched specs from DigiKey for', pn);
+        }
+      } catch {
+        // enrichment failure is non-fatal
+      }
+    }
+
     try {
-      const pn = item.supplierData.mpn || item.identifier;
-      const stableId = pn.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || `item-${Date.now()}`;
-      
+      const stableId = genStableId(pn);
+
       const spMap: SupplierPricesMap = {};
       if (item.supplierData.source) {
         const src = item.supplierData.source as keyof SupplierPricesMap;
         spMap[src] = {
           pn: (src === 'lcsc' ? (item.lcscCode || pn) : pn),
           price: item.supplierData.price || null,
+          moq: item.supplierData.moq || null,
+          priceBreaks: item.supplierData.priceBreaks || null,
           url: item.supplierData.url || null,
+          availability: item.supplierData.availability || null,
           quantity_available: item.supplierData.quantity_available ?? null,
         };
       }
@@ -824,13 +933,18 @@ function ImportBomModal({ productId, productName, onClose }: ImportBomModalProps
         stableId,
         partNumber: pn,
         productName: item.supplierData.description || pn,
+        description: item.supplierData.description || null,
         manufacturer: item.supplierData.manufacturer,
-        value: item.supplierData.value,
-        package: item.supplierData.package,
+        value: enrichedSpecs.value,
+        voltageRating: enrichedSpecs.voltageRating,
+        tolerance: enrichedSpecs.tolerance,
+        package: enrichedSpecs.package,
+        specs: enrichedSpecs.specs,
         category: item.supplierData.category,
         priceMin: item.supplierData.price,
         priceCurrency: "USD",
-        suppliers: item.supplierData.source,
+        suppliers: item.supplierData.source === 'lcsc' ? 'LCSC' : (item.supplierData.source === 'mouser' ? 'Mouser' : (item.supplierData.source === 'digikey' ? 'DigiKey' : item.supplierData.source)),
+        stockQty: item.supplierData.quantity_available ?? null,
         links: item.supplierData.datasheet || item.supplierData.url || null,
         supplierPrices: Object.keys(spMap).length ? JSON.stringify(spMap) : undefined,
       });
@@ -839,7 +953,21 @@ function ImportBomModal({ productId, productName, onClose }: ImportBomModalProps
       const err = e as { response?: { status?: number; data?: { stableId?: string; existing?: { stableId?: string } } } }
       if (err.response?.status === 409) {
         const existingId = err.response.data?.stableId || err.response.data?.existing?.stableId
-        if (existingId) return existingId
+        if (existingId) {
+          // Patch enriched specs onto existing item if it has none
+          if (enrichedSpecs.specs || enrichedSpecs.voltageRating || enrichedSpecs.value || enrichedSpecs.package) {
+            try {
+              await api.patch(`/items/${existingId}`, {
+                ...(enrichedSpecs.specs ? { specs: enrichedSpecs.specs } : {}),
+                ...(enrichedSpecs.voltageRating ? { voltageRating: enrichedSpecs.voltageRating } : {}),
+                ...(enrichedSpecs.value ? { value: enrichedSpecs.value } : {}),
+                ...(enrichedSpecs.package ? { package: enrichedSpecs.package } : {}),
+                ...(enrichedSpecs.tolerance ? { tolerance: enrichedSpecs.tolerance } : {}),
+              });
+            } catch { /* non-fatal */ }
+          }
+          return existingId;
+        }
       }
       return null;
     }
