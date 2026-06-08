@@ -4,10 +4,10 @@ set -e
 # Apply schema: use migrate deploy if migrations exist, else db push (safe — no --accept-data-loss)
 if [ -d "/app/prisma/migrations" ] && [ "$(ls -A /app/prisma/migrations 2>/dev/null)" ]; then
   echo "[entrypoint] Running prisma migrate deploy..."
-  npx prisma migrate deploy
+  npx prisma migrate deploy --schema=/app/prisma/schema.prisma
 else
   echo "[entrypoint] No migrations found — running prisma db push..."
-  npx prisma db push
+  npx prisma db push --schema=/app/prisma/schema.prisma --url="${DATABASE_URL}"
 fi
 
 # Seed only on first run (when no users exist)
