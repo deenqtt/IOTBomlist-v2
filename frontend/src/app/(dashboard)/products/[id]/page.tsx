@@ -131,8 +131,9 @@ interface SupplierData {
 interface MissingItemState {
   identifier: string;
   qty: number;
-  resolvedMpn?: string;  // MPN extracted from Description column
-  lcscCode?: string;     // C-code extracted from URL column
+  resolvedMpn?: string;
+  lcscCode?: string;
+  url?: string;
   status: "pending" | "searching" | "found" | "not_found" | "resolved" | "skipped";
   supplierData?: SupplierData;
 }
