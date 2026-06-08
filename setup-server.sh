@@ -250,6 +250,16 @@ http {
         add_header X-XSS-Protection "1; mode=block";
         add_header Referrer-Policy "strict-origin-when-cross-origin";
 
+        # Backend API routes — proxy ke backend container
+        location ~ ^/(health|auth|products|items|admin|documents|lcsc|mouser|digikey)(/|$) {
+            proxy_pass http://backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+
+        # Semua lainnya → frontend Next.js
         location / {
             proxy_pass http://frontend;
             proxy_http_version 1.1;
