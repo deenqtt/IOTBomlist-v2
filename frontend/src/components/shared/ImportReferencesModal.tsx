@@ -37,6 +37,7 @@ import { useQueryClient } from '@tanstack/react-query'
 interface ParsedRefRow {
   identifier: string        // MPN or PN GSPE
   lcscCode?: string         // LCSC C-code if available
+  url?: string              // raw URL from Source URL / Link column
   designators: string       // "R1, R2, C1"
   qty?: number
 }
@@ -76,7 +77,7 @@ export function ImportReferencesModal({ productId, productName, onClose }: Props
   const [file, setFile] = useState<File | null>(null)
   const [sheets, setSheets] = useState<{ name: string; headers: string[]; rows: Record<string, unknown>[] }[]>([])
   const [selectedSheet, setSelectedSheet] = useState<string>('')
-  const [mapping, setMapping] = useState({ identifier: '', lcsc: '', designators: '' })
+  const [mapping, setMapping] = useState({ identifier: '', lcsc: '', designators: '', url: '' })
   const [preview, setPreview] = useState<PreviewRow[]>([])
   const [isPreviewing, setIsPreviewing] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
@@ -113,9 +114,10 @@ export function ImportReferencesModal({ productId, productName, onClose }: Props
     const h = headers.map(x => x.toLowerCase())
     const find = (terms: string[]) => headers.find((_, i) => terms.some(t => h[i].includes(t))) || ''
     setMapping({
-      identifier: find(['manufacture part', 'mpn', 'mfr part', 'part number', 'pn gspe', 'p/n gspe']),
+      identifier: find(['manufacture part', 'mpn', 'mfr part', 'part number', 'pn gspe', 'p/n gspe', 'description']),
       lcsc: find(['lcsc']),
       designators: find(['part pcb', 'refrence', 'reference', 'ref', 'designator']),
+      url: find(['source url', 'url', 'link', 'remark']),
     })
   }
 
@@ -135,18 +137,25 @@ export function ImportReferencesModal({ productId, productName, onClose }: Props
 
     setIsPreviewing(true)
     const rows: ParsedRefRow[] = sheet.rows
-      .map(row => ({
-        identifier: String(row[mapping.identifier] || '').trim(),
-        lcscCode: mapping.lcsc ? String(row[mapping.lcsc] || '').trim() || undefined : undefined,
-        designators: String(row[mapping.designators] || '').trim(),
-        qty: Number(row['QTY'] || row['TOTAL QTY'] || row['QTY PER PCB'] || 0) || undefined,
-      }))
+      .map(row => {
+        const primaryId = String(row[mapping.identifier] || '').trim()
+        // fallback: if primary identifier col is empty, try Description
+        const identifier = primaryId || String(row['Description'] || row['description'] || '').trim()
+        const rawUrl = mapping.url ? String(row[mapping.url] || '').trim() : ''
+        return {
+          identifier,
+          lcscCode: mapping.lcsc ? String(row[mapping.lcsc] || '').trim() || undefined : undefined,
+          url: rawUrl || undefined,
+          designators: String(row[mapping.designators] || '').trim(),
+          qty: Number(row['QTY'] || row['TOTAL QTY'] || row['QTY PER PCB'] || 0) || undefined,
+        }
+      })
       .filter(r => r.identifier && r.designators)
 
     // Check which ones match DB (via analyze endpoint)
     try {
       const res = await api.post('/products/import/analyze', {
-        items: rows.map(r => ({ identifier: r.identifier, qty: r.qty || 1, url: r.lcscCode ? `_${r.lcscCode}.html` : undefined }))
+        items: rows.map(r => ({ identifier: r.identifier, qty: r.qty || 1, url: r.url || (r.lcscCode ? `_${r.lcscCode}.html` : undefined) }))
       })
       const matchedIds = new Set(res.data.matched.map((m: { identifier: string }) => m.identifier))
       const notFoundIds = new Set(res.data.notFound.map((m: { identifier: string }) => m.identifier))
