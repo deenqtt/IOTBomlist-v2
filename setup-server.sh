@@ -272,15 +272,15 @@ http {
             proxy_set_header Host $host;
         }
 
-        # admin/import needs long timeout for file uploads
+        # admin/import needs long timeout for file uploads + auto-enrich (800+ items)
         location ~ ^/admin(/|$) {
             proxy_pass http://$api_upstream;
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_read_timeout 300s;
-            proxy_send_timeout 300s;
+            proxy_read_timeout 1800s;
+            proxy_send_timeout 1800s;
         }
 
         # API routes: Bearer token present = API call → backend, else = page nav → frontend

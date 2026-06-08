@@ -1134,6 +1134,7 @@ function ImportTab() {
     try {
       const res = await api.post(`/admin/import?dryRun=false&autoEnrich=${autoEnrich}`, fd, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 30 * 60 * 1000, // 30 min — enrich 800+ items hits LCSC/Mouser/DigiKey
       });
       setAnalysis(res.data);
       await runVerification();
