@@ -122,6 +122,7 @@ cat > docker-compose.prod.yml << 'COMPOSE_EOF'
 services:
   db:
     image: postgres:15-alpine
+    pull_policy: if_not_present
     container_name: bom-db
     restart: always
     environment:
@@ -202,6 +203,7 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
+    pull_policy: if_not_present
     container_name: bom-nginx
     restart: always
     depends_on:
@@ -280,8 +282,8 @@ NGINX_EOF
 success "nginx/nginx.conf dibuat"
 
 # ─── Pull & Start ─────────────────────────────────────────────────────────────
-info "Pulling Docker images dari GHCR..."
-docker compose -f docker-compose.prod.yml pull
+info "Pulling Docker images dari GHCR (skip nginx & postgres — sudah ada di server)..."
+docker compose -f docker-compose.prod.yml pull sidecar backend frontend
 
 info "Menjalankan semua services..."
 docker compose -f docker-compose.prod.yml up -d
