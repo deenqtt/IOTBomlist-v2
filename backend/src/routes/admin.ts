@@ -368,7 +368,7 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
 
     console.log(`[Auto-Enrich] Initiating for Part: ${pn} (SID: ${sid}, LCSC: ${lcsc || 'N/A'})`);
     try {
-      let found = null;
+      let found: any = null;
       let source = "";
 
       // Detect preferred supplier — kolom Supplier(s) sebagai primary, URL scan sebagai fallback
