@@ -316,10 +316,13 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
         const targetSupplier = detectSupplier(item.url || "");
         
         try {
-          let found = null
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let found: any = null
           let source = 'mouser'
 
-          const searchPn = item.resolvedMpn || item.identifier;
+          // Strip parenthetical alternates e.g. "0ZCJ0010FF2E (FUSC3216X75N)" → "0ZCJ0010FF2E"
+          const cleanIdentifier = (item.resolvedMpn || item.identifier).replace(/\s*\(.*?\)/g, '').trim();
+          const searchPn = cleanIdentifier;
 
           // Helper for LCSC Deep Lookup
           const doLcscLookup = async (code: string) => {
@@ -327,56 +330,52 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
             return res.data?.items?.[0];
           };
 
+          // Helper search per supplier
+          const searchLcsc = async () => {
+            const res = await api.post("/lcsc/search", { keyword: searchPn, limit: 5 });
+            const lcscMatch = res.data?.items?.find((r: { mpn?: string; lcsc?: string }) => r.mpn?.toLowerCase() === searchPn.toLowerCase()) || res.data?.items?.[0];
+            if (lcscMatch?.lcsc) {
+              const result = await doLcscLookup(lcscMatch.lcsc);
+              if (result) { found = result; source = "lcsc"; }
+            }
+          };
+          const searchMouser = async () => {
+            const res = await api.post("/mouser/search", { keyword: searchPn, qty: item.qty });
+            if (res.data?.items?.[0]) { found = res.data.items[0]; source = "mouser"; }
+          };
+          const searchDigikey = async () => {
+            const res = await api.post("/digikey/search", { keyword: searchPn, qty: item.qty });
+            if (res.data?.items?.[0]) { found = res.data.items[0]; source = "digikey"; }
+          };
+
           // 1. Targeted Search
           if (targetSupplier === "lcsc" || item.lcscCode) {
-            const code = item.lcscCode || (item.url ? (item.url.match(/_(C\d+)\.html/i)?.[1]) : null);
+            const code = item.lcscCode || (item.url ? (item.url.match(/_(C\d+)\.html/i)?.[1] || item.url.match(/\/C(\d+)\.html/i)?.[1]) : null);
             if (code) {
-              found = await doLcscLookup(code);
+              found = await doLcscLookup(`C${code.replace(/^C/i, '')}`);
               if (found) source = "lcsc";
             }
-            
-            if (!found) {
-              const res = await api.post("/lcsc/search", { keyword: searchPn, limit: 5 });
-              const lcscMatch = res.data?.items?.find((r: { mpn?: string; lcsc?: string }) => r.mpn?.toLowerCase() === searchPn.toLowerCase()) || res.data?.items?.[0];
-              if (lcscMatch?.lcsc) {
-                found = await doLcscLookup(lcscMatch.lcsc);
-                if (found) source = "lcsc";
-              }
-            }
-          } 
+            if (!found) await searchLcsc();
+          }
           else if (targetSupplier === "mouser") {
-            const res = await api.post("/mouser/search", { keyword: searchPn, qty: item.qty });
-            found = res.data?.items?.[0];
-            if (found) source = "mouser";
-          } 
+            await searchMouser();
+          }
           else if (targetSupplier === "digikey") {
-            const res = await api.post("/digikey/search", { keyword: searchPn, qty: item.qty });
-            found = res.data?.items?.[0];
-            if (found) source = "digikey";
+            await searchDigikey();
           }
 
-          // 2. Fallback
+          // 2. Fallback — prioritize targetSupplier, then remaining suppliers
           if (!found) {
-            // LCSC
-            if (!found) {
-              const res = await api.post("/lcsc/search", { keyword: searchPn, limit: 5 });
-              const lcscMatch = res.data?.items?.[0];
-              if (lcscMatch?.lcsc) {
-                found = await doLcscLookup(lcscMatch.lcsc);
-                if (found) source = "lcsc";
-              }
-            }
-            // Mouser
-            if (!found) {
-              const res = await api.post("/mouser/search", { keyword: searchPn, qty: item.qty });
-              found = res.data?.items?.[0];
-              if (found) source = "mouser";
-            }
-            // DigiKey
-            if (!found) {
-              const res = await api.post("/digikey/search", { keyword: searchPn, qty: item.qty });
-              found = res.data?.items?.[0];
-              if (found) source = "digikey";
+            const allSuppliers: Array<() => Promise<void>> = [
+              searchLcsc, searchMouser, searchDigikey,
+            ];
+            const priorityMap = { lcsc: 0, mouser: 1, digikey: 2 };
+            const order = targetSupplier
+              ? [priorityMap[targetSupplier], ...([0,1,2].filter(i => i !== priorityMap[targetSupplier]))]
+              : [0, 1, 2];
+            for (const idx of order) {
+              if (found) break;
+              await allSuppliers[idx]();
             }
           }
 
