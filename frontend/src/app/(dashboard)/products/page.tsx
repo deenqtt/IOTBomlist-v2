@@ -343,6 +343,9 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
                   ? { ...result, quantity_available: marketplaceStock }
                   : result
                 found = merged; source = "lcsc";
+              } else {
+                // Sidecar miss (marketplace-only part) — use jlcsearch result directly
+                found = lcscMatch; source = "lcsc";
               }
             }
           };
@@ -361,6 +364,12 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
             if (code) {
               found = await doLcscLookup(`C${code.replace(/^C/i, '')}`);
               if (found) source = "lcsc";
+              if (!found) {
+                // Sidecar miss — try jlcsearch with C-code for marketplace-only parts
+                const mktRes = await api.post("/lcsc/search", { keyword: `C${code.replace(/^C/i, '')}`, limit: 1 }).catch(() => null);
+                const mktItem = mktRes?.data?.items?.[0];
+                if (mktItem) { found = mktItem; source = "lcsc"; }
+              }
             }
             if (!found) await searchLcsc().catch(() => {});
           }
