@@ -24,6 +24,7 @@ services:
       JLC_APP_ID: ${JLC_APP_ID}
       JLC_ACCESS_KEY: ${JLC_ACCESS_KEY}
       JLC_SECRET_KEY: ${JLC_SECRET_KEY}
+      JLC_ENDPOINT: ${JLC_ENDPOINT:-https://jlcpcb.com/api/}
       JLC_PORT: 8089
     # No ports exposed — only backend accesses sidecar via internal Docker network
     healthcheck:
