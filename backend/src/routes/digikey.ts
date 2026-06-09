@@ -226,7 +226,7 @@ digikey.post('/search', async (c) => {
 
   const searchTerm = pn ?? keyword
   const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), 10000)
+  const t = setTimeout(() => ctrl.abort(), 20000)
   const res = await fetch(`${API_HOST}/products/v4/search/keyword`, {
     method: 'POST',
     headers,

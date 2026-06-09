@@ -143,7 +143,7 @@ mouser.post('/search', async (c) => {
   const searchTerm = (pn || keyword || '').trim()
   const looksLikeMpn = !searchTerm.includes(' ')
 
-  const MOUSER_TIMEOUT_MS = 10000
+  const MOUSER_TIMEOUT_MS = 20000
   const fetchWithTimeout = (url: string, opts: RequestInit) => {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), MOUSER_TIMEOUT_MS)
