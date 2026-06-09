@@ -142,6 +142,7 @@ services:
       JLC_APP_ID: ${JLC_APP_ID}
       JLC_ACCESS_KEY: ${JLC_ACCESS_KEY}
       JLC_SECRET_KEY: ${JLC_SECRET_KEY}
+      JLC_ENDPOINT: ${JLC_ENDPOINT:-https://jlcpcb.com/api/}
       JLC_PORT: 8089
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 8089 || exit 1"]
