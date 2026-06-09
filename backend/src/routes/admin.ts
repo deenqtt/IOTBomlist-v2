@@ -404,8 +404,10 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
           ? allUrls.find(u => hints.some(d => u.toLowerCase().includes(d))) ?? allUrls[0]
           : allUrls[0]
         if (matchedUrl) {
-          const spMap: Record<string, unknown> = {}
-          spMap[supKey] = { pn: pn, url: matchedUrl, price: null, quantity_available: null }
+          // Use "other" key so UI SupplierPnBadges renders the link button
+          const spMap: Record<string, unknown> = {
+            other: { pn: pn, url: matchedUrl, price: null, quantity_available: null }
+          }
           await prisma.item.update({
             where: { stableId: sid },
             data: {
@@ -420,21 +422,23 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
         return false
       }
 
-      // If supplier explicitly set from column, skip LCSC for commercial parts (Würth, etc. not on LCSC)
+      // If supplier explicitly set from column → only search that supplier, no fallback (save API quota)
+      // If detected from URL scan → allow fallback across suppliers
       const strictSupplier = detectedFrom === 'supplier column'
-      const order: SearchTarget[] = preferred === 'lcsc'
-        ? ['lcsc', 'mouser', 'digikey']
-        : preferred === 'mouser'
-          ? (strictSupplier ? ['mouser', 'digikey'] : ['mouser', 'lcsc', 'digikey'])
-          : preferred === 'digikey'
-            ? (strictSupplier ? ['digikey', 'mouser'] : ['digikey', 'lcsc', 'mouser'])
-            : ['lcsc', 'mouser', 'digikey']
+      const order: SearchTarget[] = strictSupplier && preferred
+        ? [preferred]                                          // single supplier, no fallback
+        : preferred === 'lcsc'
+          ? ['lcsc', 'mouser', 'digikey']
+          : preferred === 'mouser'
+            ? ['mouser', 'lcsc', 'digikey']
+            : preferred === 'digikey'
+              ? ['digikey', 'lcsc', 'mouser']
+              : ['lcsc', 'mouser', 'digikey']
 
       // Collect unsupported supplier URLs from links (AliExpress, Tokopedia, etc.) to preserve
       const unsupportedDomains: Record<string, string[]> = {
         tokopedia:  ['tokopedia.com'],
         aliexpress: ['aliexpress.com', 'aliexpress.us'],
-        waveshare:  ['waveshare.com'],
         shopee:     ['shopee.co'],
         lazada:     ['lazada.co'],
       }
@@ -450,9 +454,10 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
       // No supported supplier found anywhere (URL scan + column both null), BUT have unsupported URLs
       // → skip auto-enrich entirely, just save the URL so UI shows blue link button
       if (!preferred && !supplierCol && !lcsc && extraUrls.length > 0) {
-        const fallbackMap: any = {}
-        for (const { key, url } of extraUrls) {
-          fallbackMap[key] = { pn: pn, url, price: null, quantity_available: null }
+        // Use "other" key for all unsupported URLs so UI renders the link button
+        const firstUrl = extraUrls[0].url
+        const fallbackMap: any = {
+          other: { pn: pn, url: firstUrl, price: null, quantity_available: null }
         }
         await prisma.item.update({
           where: { stableId: sid },
@@ -469,11 +474,26 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
       let discoveredLcsc: string | null = lcsc || null
       if (lcsc) {
         console.log(`[Auto-Enrich] Querying LCSC by C-code: ${lcsc}`);
-        const res = await api.post("/lcsc/lookup", { items: [{ lcsc, qty: 1 }] });
-        found = res.data?.items?.[0];
+        // Also fetch search result to get marketplace stock (lookup returns JLCPCB warehouse stock which can be 0)
+        const [lookupRes, searchRes] = await Promise.all([
+          api.post("/lcsc/lookup", { items: [{ lcsc, qty: 1 }] }),
+          api.post("/lcsc/search", { keyword: lcsc, limit: 1 }),
+        ])
+        found = lookupRes.data?.items?.[0];
+        const mktItem = searchRes.data?.items?.[0]
         if (found) {
           source = "lcsc";
-          console.log(`[Auto-Enrich] Found on LCSC: ${found.mpn}, Price: ${found.price}`);
+          const marketplaceStock = mktItem?.quantity_available
+          if ((!found.quantity_available || found.quantity_available === 0) && marketplaceStock) {
+            found = { ...found, quantity_available: marketplaceStock }
+            console.log(`[Auto-Enrich] Using marketplace stock for ${lcsc}: ${marketplaceStock}`)
+          }
+          console.log(`[Auto-Enrich] Found on LCSC: ${found.mpn}, Price: ${found.price}, Stock: ${found.quantity_available}`);
+        } else if (mktItem) {
+          // Sidecar miss (marketplace-only part) — use jlcsearch result already fetched in parallel
+          found = mktItem
+          source = 'lcsc'
+          console.log(`[Auto-Enrich] Sidecar miss for ${lcsc} — using jlcsearch result: ${found.mpn}, Stock: ${found.quantity_available}`)
         }
       }
 
@@ -495,7 +515,13 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
               if (found) {
                 source = 'lcsc';
                 discoveredLcsc = match.lcsc
-                console.log(`[Auto-Enrich]   LCSC lookup OK: mpn=${found.mpn} value=${found.value} voltageRating=${found.voltageRating} tolerance=${found.tolerance} package=${found.package} price=${found.price}`);
+                // Prefer marketplace stock (from search) over JLCPCB warehouse stock (from lookup)
+                // because lookup uses JLC Business SDK which returns SMT assembly stock, not LCSC marketplace stock
+                if ((!found.quantity_available || found.quantity_available === 0) && match.quantity_available) {
+                  found = { ...found, quantity_available: match.quantity_available }
+                  console.log(`[Auto-Enrich]   Using marketplace stock from search: ${match.quantity_available} (lookup returned 0)`)
+                }
+                console.log(`[Auto-Enrich]   LCSC lookup OK: mpn=${found.mpn} value=${found.value} voltageRating=${found.voltageRating} tolerance=${found.tolerance} package=${found.package} price=${found.price} stock=${found.quantity_available}`);
               }
             } else {
               console.log(`[Auto-Enrich]   No LCSC match found`);
@@ -583,6 +609,8 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
       }
 
       if (found) {
+        const currentItem = await prisma.item.findUnique({ where: { stableId: sid }, select: { productName: true } })
+
         console.log(`[enrichItem] found from ${source}:`, JSON.stringify({
           mpn: found.mpn, manufacturer: found.manufacturer, description: found.description,
           package: found.package, category: found.category, value: found.value,
@@ -627,9 +655,21 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
           quantity_available: stockNum,
           priceBreaks: found.priceBreaks || []
         };
-        // Preserve unsupported supplier URLs (AliExpress, Tokopedia, etc.) alongside main supplier
-        for (const { key, url } of extraUrls) {
-          if (!spMap[key]) spMap[key] = { pn: pn, url, price: null, quantity_available: null }
+        // Preserve unsupported supplier URLs (AliExpress, Tokopedia, etc.) under "other" key so UI renders button
+        if (extraUrls.length > 0 && !spMap['other']) {
+          spMap['other'] = { pn: pn, url: extraUrls[0].url, price: null, quantity_available: null }
+        }
+        // Preserve secondary supported supplier URLs from original links (URL-only, no price/stock)
+        // e.g. strictSupplier=digikey but links also has Mouser URL → keep mouser badge in UI
+        const supportedDomains: Record<string, string[]> = {
+          lcsc:    ['lcsc.com'],
+          mouser:  ['mouser.com', 'mouser.co'],
+          digikey: ['digikey.com', 'digikey.co'],
+        }
+        for (const [supKey, domains] of Object.entries(supportedDomains)) {
+          if (supKey === source || spMap[supKey]) continue
+          const secUrl = allLinkUrls.find(u => domains.some(d => u.toLowerCase().includes(d)))
+          if (secUrl) spMap[supKey] = { pn: found.mpn || pn, url: secUrl, price: null, quantity_available: null }
         }
 
         // Auto-fix partNumber: kalau sekarang C-code (e.g. "C114767") tapi LCSC return MPN asli → update
@@ -664,6 +704,8 @@ admin.post('/import', requireRole('admin', 'super'), async (c) => {
             ...(realMpn ? { partNumber: realMpn } : {}),
             // specs blob (DigiKey Parameters JSON)
             ...(specsData.specs ? { specs: specsData.specs } : {}),
+            // fill productName if currently empty (ALT items often have no product name in old export)
+            ...(!currentItem?.productName && found.description ? { productName: found.description } : {}),
             // fill technical fields only if currently empty
             ...(found.description         ? { description:    found.description    } : {}),
             ...(found.manufacturer        ? { manufacturer:   found.manufacturer   } : {}),

@@ -185,9 +185,8 @@ lcsc.post('/search', async (c) => {
 
   if (!res.ok) return c.json({ error: `Search proxy error ${res.status}` }, 502)
   const data = await res.json() as { components: any[] }
-  
-  const items = (data.components ?? []).slice(0, limit).map(comp => {
-    // Parse price breaks from JSON string
+
+  function mapComp(comp: any) {
     let priceBreaks: any[] | null = null
     let price: number | null = null
     try {
@@ -197,13 +196,8 @@ lcsc.post('/search', async (c) => {
         qtyTo: pb.qTo || null,
         unitPrice: pb.price
       }))
-      if (priceBreaks && priceBreaks.length > 0) {
-        price = priceBreaks[0].unitPrice
-      }
-    } catch (e) {
-      console.error('[LCSC Search] Failed to parse price:', comp.price)
-    }
-
+      if (priceBreaks && priceBreaks.length > 0) price = priceBreaks[0].unitPrice
+    } catch { /* ignore */ }
     const lcscCode = `C${comp.lcsc}`
     return {
       mpn: comp.mfr,
@@ -217,7 +211,30 @@ lcsc.post('/search', async (c) => {
       url: `https://www.lcsc.com/product-detail/${lcscCode}.html`,
       source: 'lcsc'
     }
-  })
+  }
+
+  let items = (data.components ?? []).slice(0, limit).map(mapComp)
+
+  // Fallback: jlcsearch miss on exact MPN (e.g. "ERJ-3EKF10R0V") — try sidecar lookup by MPN
+  if (items.length === 0 && keyword && !/^\d+$/.test(keyword)) {
+    try {
+      const sidecarRes = await fetch(`${SIDECAR}/component/info`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ pn: keyword, qty: 1 }] }),
+      })
+      if (sidecarRes.ok) {
+        const sidecarData = await sidecarRes.json() as { items?: Record<string, unknown>[] }
+        const normalized = (sidecarData.items ?? []).map(normalizeLcscItem).filter((i: any) => i.mpn || i.lcsc)
+        if (normalized.length > 0) {
+          console.log(`[LCSC Search] jlcsearch miss for "${keyword}" — sidecar fallback found ${normalized.length} result(s)`)
+          items = normalized as any[]
+        }
+      }
+    } catch (e: any) {
+      console.warn(`[LCSC Search] Sidecar fallback failed for "${keyword}": ${e.message}`)
+    }
+  }
 
   return c.json({ items, total: items.length })
 })

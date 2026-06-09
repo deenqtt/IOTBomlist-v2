@@ -336,7 +336,14 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
             const lcscMatch = res.data?.items?.find((r: { mpn?: string; lcsc?: string }) => r.mpn?.toLowerCase() === searchPn.toLowerCase()) || res.data?.items?.[0];
             if (lcscMatch?.lcsc) {
               const result = await doLcscLookup(lcscMatch.lcsc);
-              if (result) { found = result; source = "lcsc"; }
+              if (result) {
+                // Prefer marketplace stock from search over JLCPCB warehouse stock from lookup
+                const marketplaceStock = lcscMatch.quantity_available
+                const merged = (!result.quantity_available && marketplaceStock)
+                  ? { ...result, quantity_available: marketplaceStock }
+                  : result
+                found = merged; source = "lcsc";
+              }
             }
           };
           const searchMouser = async () => {
