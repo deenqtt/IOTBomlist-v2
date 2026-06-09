@@ -143,23 +143,33 @@ mouser.post('/search', async (c) => {
   const searchTerm = (pn || keyword || '').trim()
   const looksLikeMpn = !searchTerm.includes(' ')
 
+  const MOUSER_TIMEOUT_MS = 10000
+  const fetchWithTimeout = (url: string, opts: RequestInit) => {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), MOUSER_TIMEOUT_MS)
+    return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t))
+  }
+
   if (pn || looksLikeMpn) {
     // Part-number search returns full ProductAttributes (specs)
-    const res = await fetch(`${BASE}/search/partnumber?apiKey=${key}`, {
+    const res = await fetchWithTimeout(`${BASE}/search/partnumber?apiKey=${key}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         SearchByPartRequest: { mouserPartNumber: searchTerm, partSearchOptions: '' }
       }),
-    })
+    }).catch(() => null)
+    if (!res) return c.json({ error: 'Mouser API timeout' }, 504)
     if (!res.ok) return c.json({ error: `Mouser API error ${res.status}` }, 502)
+    const ct = res.headers.get('content-type') ?? ''
+    if (!ct.includes('application/json')) return c.json({ error: 'Mouser API returned non-JSON response' }, 502)
     const data = await res.json() as Record<string, unknown>
     parts = ((data.SearchResults as Record<string, unknown>)?.Parts as Record<string, unknown>[]) ?? []
   }
 
   // Fallback to keyword search if no results (or multi-word query)
   if (parts.length === 0 && keyword) {
-    const res = await fetch(`${BASE}/search/keyword?apiKey=${key}`, {
+    const res = await fetchWithTimeout(`${BASE}/search/keyword?apiKey=${key}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -171,8 +181,11 @@ mouser.post('/search', async (c) => {
           searchWithYourSignUpLanguage: '',
         }
       }),
-    })
+    }).catch(() => null)
+    if (!res) return c.json({ error: 'Mouser API timeout' }, 504)
     if (!res.ok) return c.json({ error: `Mouser API error ${res.status}` }, 502)
+    const ct2 = res.headers.get('content-type') ?? ''
+    if (!ct2.includes('application/json')) return c.json({ error: 'Mouser API returned non-JSON response' }, 502)
     const data = await res.json() as Record<string, unknown>
     parts = ((data.SearchResults as Record<string, unknown>)?.Parts as Record<string, unknown>[]) ?? []
   }

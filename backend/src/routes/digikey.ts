@@ -225,12 +225,16 @@ digikey.post('/search', async (c) => {
   const headers = makeHeaders(token, clientId)
 
   const searchTerm = pn ?? keyword
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), 10000)
   const res = await fetch(`${API_HOST}/products/v4/search/keyword`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ Keywords: String(searchTerm).trim(), Limit: limit, Offset: 0, Includes: ['Parameters'] }),
-  })
+    signal: ctrl.signal,
+  }).catch(() => null).finally(() => clearTimeout(t))
 
+  if (!res) return c.json({ error: 'DigiKey API timeout' }, 504)
   if (!res.ok) {
     const text = await res.text()
     return c.json({ error: `DigiKey API error ${res.status}: ${text.slice(0, 200)}` }, 502)
