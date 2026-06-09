@@ -355,20 +355,20 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
             if (res.data?.items?.[0]) { found = res.data.items[0]; source = "digikey"; }
           };
 
-          // 1. Targeted Search
+          // 1. Targeted Search — wrap each in try/catch so timeout doesn't kill fallback
           if (targetSupplier === "lcsc" || item.lcscCode) {
             const code = item.lcscCode || (item.url ? (item.url.match(/_(C\d+)\.html/i)?.[1] || item.url.match(/\/C(\d+)\.html/i)?.[1]) : null);
             if (code) {
               found = await doLcscLookup(`C${code.replace(/^C/i, '')}`);
               if (found) source = "lcsc";
             }
-            if (!found) await searchLcsc();
+            if (!found) await searchLcsc().catch(() => {});
           }
           else if (targetSupplier === "mouser") {
-            await searchMouser();
+            await searchMouser().catch(() => {});
           }
           else if (targetSupplier === "digikey") {
-            await searchDigikey();
+            await searchDigikey().catch(() => {});
           }
 
           // 2. Fallback — prioritize targetSupplier, then remaining suppliers
@@ -382,7 +382,7 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
               : [0, 1, 2];
             for (const idx of order) {
               if (found) break;
-              await allSuppliers[idx]();
+              await allSuppliers[idx]().catch(() => {});
             }
           }
 
