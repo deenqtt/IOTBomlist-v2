@@ -23,6 +23,10 @@ model Product {
   imageUrl       String?           @map("image_url")
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @updatedAt @map("updated_at")
+  estCostUSD     Float?            @map("est_cost_usd")
+  estAltCostUSD  Float?            @map("est_alt_cost_usd")
+  missingPrices  Int?              @map("missing_prices")
+  costUpdatedAt  DateTime?         @map("cost_updated_at")
   items          ProductItem[]
   relations      ProductRelation[] @relation("ParentRelations")
   childRelations ProductRelation[] @relation("ChildRelations")
@@ -94,6 +98,10 @@ model ConfigSet {
   createdBy     String?         @map("created_by")
   createdAt     DateTime        @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")
+  estCostUSD    Float?          @map("est_cost_usd")
+  estAltCostUSD Float?          @map("est_alt_cost_usd")
+  missingPrices Int?            @map("missing_prices")
+  costUpdatedAt DateTime?       @map("cost_updated_at")
   parent        ConfigSet?      @relation("SetInheritance", fields: [parentSetId], references: [id])
   children      ConfigSet[]     @relation("SetInheritance")
   items         ConfigSetItem[]
@@ -118,13 +126,18 @@ model ConfigSetItem {
 }
 
 model Superset {
-  id        Int            @id @default(autoincrement())
-  name      String         @unique
-  notes     String?
-  createdBy String?        @map("created_by")
-  createdAt DateTime       @default(now()) @map("created_at")
-  updatedAt DateTime       @updatedAt @map("updated_at")
-  items     SupersetItem[]
+  id                 Int            @id @default(autoincrement())
+  name               String         @unique
+  notes              String?
+  createdBy          String?        @map("created_by")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+  estCostUSD         Float?         @map("est_cost_usd")
+  estAltCostUSD      Float?         @map("est_alt_cost_usd")
+  missingPrices      Int?           @map("missing_prices")
+  costUpdatedAt      DateTime?      @map("cost_updated_at")
+  budgetDrainersJson String?        @map("budget_drainers_json")
+  items              SupersetItem[]
 
   @@map("supersets")
 }

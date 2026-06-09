@@ -4,6 +4,7 @@ import { join } from 'path'
 import prisma from '../lib/prisma.js'
 import { authMiddleware, requireRole, AuthUser } from '../middleware/auth.js'
 import { logChange } from '../lib/changelog.js'
+import { invalidateCosts } from './costing.js'
 
 const supersets = new Hono<{ Variables: { user: AuthUser } }>()
 supersets.use('*', authMiddleware)
@@ -397,6 +398,7 @@ supersets.post('/', requireRole('admin', 'super'), async (c) => {
     changedBy: user.username,
     context: 'Create Project'
   })
+  await invalidateCosts()
 
   return c.json(ss, 201)
 })
@@ -449,6 +451,7 @@ supersets.patch('/:id', requireRole('admin', 'super'), async (c) => {
       context: 'Update Project Bundle'
     })
   }
+  await invalidateCosts()
 
   return c.json(ss)
 })
@@ -471,6 +474,7 @@ supersets.delete('/:id', requireRole('admin', 'super'), async (c) => {
     changedBy: user.username,
     context: 'Delete Project'
   })
+  await invalidateCosts()
 
   return c.body(null, 204)
 })

@@ -4,6 +4,7 @@ import prisma from '../lib/prisma.js'
 import { authMiddleware, requireRole, AuthUser } from '../middleware/auth.js'
 import { logChange } from '../lib/changelog.js'
 import { clearDigikeyTokenCache } from './digikey.js'
+import { invalidateCosts } from './costing.js'
 import { generateBackupBuffer } from '../lib/backup.js'
 import * as XLSX from 'xlsx'
 import { readdirSync, existsSync, readFileSync } from 'fs'
@@ -1719,6 +1720,7 @@ admin.post('/refresh-prices', requireRole('admin', 'super'), async (c) => {
     }
     job.status = 'done'
     job.finishedAt = Date.now()
+    await invalidateCosts()
     // Clean up after 10 minutes
     setTimeout(() => priceJobs.delete(jobId), 10 * 60 * 1000)
   })()

@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import prisma from '../lib/prisma.js'
 import { authMiddleware, requireRole, AuthUser } from '../middleware/auth.js'
 import { logChange } from '../lib/changelog.js'
+import { invalidateCosts } from './costing.js'
 
 const items = new Hono<{ Variables: { user: AuthUser } }>()
 items.use('*', authMiddleware)
@@ -392,6 +393,8 @@ items.patch('/:stableId', requireRole('admin', 'super'), async (c) => {
       })
     }
   }
+
+  if ('priceMin' in data || 'supplierPrices' in data) await invalidateCosts()
 
   return c.json(item)
 })

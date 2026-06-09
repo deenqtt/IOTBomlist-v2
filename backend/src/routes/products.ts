@@ -12,6 +12,7 @@ import { Item } from "@prisma/client";
 import prisma from "../lib/prisma.js";
 import { authMiddleware, requireRole, AuthUser } from "../middleware/auth.js";
 import { logChange } from "../lib/changelog.js";
+import { invalidateCosts } from "./costing.js";
 
 const products = new Hono<{ Variables: { user: AuthUser } }>();
 products.use("*", authMiddleware);
@@ -716,6 +717,7 @@ products.post("/:id/items", requireRole("admin", "super"), async (c) => {
     changedBy: user.username,
     context: 'Add Item to BOM'
   });
+  await invalidateCosts();
 
   return c.json(pi, 201);
 });
@@ -755,6 +757,7 @@ products.patch(
         });
       }
     }
+    await invalidateCosts();
 
     return c.json(pi);
   },
@@ -781,6 +784,7 @@ products.delete(
       changedBy: user.username,
       context: 'Remove Item from BOM'
     });
+    await invalidateCosts();
 
     return c.body(null, 204);
   },
@@ -814,6 +818,7 @@ products.post(
       changedBy: user.username,
       context: 'Bulk BOM Removal'
     });
+    await invalidateCosts();
 
     return c.json({ deletedCount: result.count });
   },
@@ -931,6 +936,7 @@ products.post(
       changedBy: user.username,
       context: 'Bulk BOM Integration'
     });
+    await invalidateCosts();
 
     return c.json(results);
   },

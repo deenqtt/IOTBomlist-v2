@@ -2176,6 +2176,7 @@ function PriceSyncTab() {
           if (r.data.status !== "running") {
             stopPoll();
             stopTick();
+            try { await api.post("/costing/recalculate"); } catch {}
             qc.invalidateQueries({ queryKey: ["costing-products"] });
             qc.invalidateQueries({ queryKey: ["costing-sets"] });
             qc.invalidateQueries({ queryKey: ["costing-projects"] });

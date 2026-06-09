@@ -6,6 +6,7 @@ import {
   ShieldCheck,
   BarChart3,
   KeyRound,
+  BookOpen,
 } from "lucide-react";
 import type { ElementType } from "react";
 
@@ -63,6 +64,13 @@ export const NAV_CONFIG: NavSectionConfig[] = [
     items: [
       { href: "/admin", label: "System Control", icon: ShieldCheck },
       { href: "/configure", label: "API Keys", icon: KeyRound, role: "super" as NavRole },
+    ],
+  },
+  {
+    id: "help",
+    label: "Help",
+    items: [
+      { href: "/help", label: "User Manual", icon: BookOpen },
     ],
   },
 ];

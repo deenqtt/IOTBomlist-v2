@@ -123,14 +123,12 @@ export function useAutoBackups() {
   })
 }
 
-export function downloadBackup(token: string) {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
-  return fetch(`${baseUrl}/admin/backup`, {
-    headers: { Authorization: `Bearer ${token}` },
-  }).then(r => r.blob()).then(blob => {
-    const url = URL.createObjectURL(blob)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function downloadBackup(_token: string) {
+  const now = new Date().toISOString().slice(0, 10)
+  return api.get('/admin/backup', { responseType: 'blob' }).then(({ data }) => {
+    const url = URL.createObjectURL(data)
     const a = document.createElement('a')
-    const now = new Date().toISOString().slice(0, 10)
     a.href = url
     a.download = `bom_backup_${now}.xlsx`
     a.click()
@@ -138,12 +136,10 @@ export function downloadBackup(token: string) {
   })
 }
 
-export function downloadAutoBackup(filename: string, token: string) {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
-  return fetch(`${baseUrl}/admin/backups/auto/${filename}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  }).then(r => r.blob()).then(blob => {
-    const url = URL.createObjectURL(blob)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function downloadAutoBackup(filename: string, _token: string) {
+  return api.get(`/admin/backups/auto/${filename}`, { responseType: 'blob' }).then(({ data }) => {
+    const url = URL.createObjectURL(data)
     const a = document.createElement('a')
     a.href = url
     a.download = filename

@@ -60,7 +60,7 @@ export function useProductCosts(currency: string, ids?: number[]) {
     queryFn: async () => (await api.get('/costing/products', { 
       params: { currency, ids: ids?.join(',') } 
     })).data,
-    staleTime: Infinity,
+    staleTime: 0,
   })
 }
 
@@ -70,7 +70,7 @@ export function useSetCosts(currency: string, ids?: number[]) {
     queryFn: async () => (await api.get('/costing/sets', { 
       params: { currency, ids: ids?.join(',') } 
     })).data,
-    staleTime: Infinity,
+    staleTime: 0,
   })
 }
 
@@ -78,7 +78,7 @@ export function useSupplierCosts(currency: string) {
   return useQuery<SupplierCost[]>({
     queryKey: ['costing-by-supplier', currency],
     queryFn: async () => (await api.get('/costing/by-supplier', { params: { currency } })).data,
-    staleTime: Infinity,
+    staleTime: 0,
   })
 }
 
@@ -88,7 +88,7 @@ export function useProjectCosts(currency: string, ids?: number[]) {
     queryFn: async () => (await api.get('/costing/supersets', { 
       params: { currency, ids: ids?.join(',') } 
     })).data,
-    staleTime: Infinity,
+    staleTime: 0,
   })
 }
 

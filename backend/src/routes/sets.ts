@@ -4,6 +4,7 @@ import { join } from 'path'
 import prisma from '../lib/prisma.js'
 import { authMiddleware, requireRole, AuthUser } from '../middleware/auth.js'
 import { logChange } from '../lib/changelog.js'
+import { invalidateCosts } from './costing.js'
 
 const sets = new Hono<{ Variables: { user: AuthUser } }>()
 sets.use('*', authMiddleware)
@@ -527,6 +528,7 @@ sets.post('/', requireRole('admin', 'super'), async (c) => {
     changedBy: user.username,
     context: 'Create Product'
   })
+  await invalidateCosts()
 
   return c.json(set, 201)
 })
@@ -587,6 +589,7 @@ sets.patch('/:id', requireRole('admin', 'super'), async (c) => {
       context: 'Update Product Composition'
     })
   }
+  await invalidateCosts()
 
   return c.json(set)
 })
@@ -613,6 +616,7 @@ sets.delete('/:id', requireRole('admin', 'super'), async (c) => {
     changedBy: user.username,
     context: 'Delete Product'
   })
+  await invalidateCosts()
 
   return c.body(null, 204)
 })
