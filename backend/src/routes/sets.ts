@@ -407,15 +407,18 @@ sets.get('/:id/export', async (c) => {
     excelRow.getCell('D').value = data.partNumber
     excelRow.getCell('E').value = data.totalQty
     excelRow.getCell('F').value = 'PCS'
-    excelRow.getCell('G').value = data.remarks
+    const gText = data.remarks
       ? `${data.purchaseUrl}  [${data.remarks}]`
       : data.purchaseUrl
-    excelRow.getCell('J').value = data.datasheetUrl
+    const jText = data.datasheetUrl
+    excelRow.getCell('G').value = data.purchaseUrl ? { text: gText, hyperlink: data.purchaseUrl } : gText
+    excelRow.getCell('J').value = jText ? { text: jText, hyperlink: jText } : jText
 
     const cols = ['A','B','C','D','E','F','G','J'] as const
     for (const col of cols) {
       const cell = excelRow.getCell(col)
       const existingStyle = cell.style
+      const isLink = (col === 'G' && !!data.purchaseUrl) || (col === 'J' && !!jText)
       cell.style = {
         ...existingStyle,
         fill: data.rowFill ? {
@@ -435,7 +438,9 @@ sets.get('/:id/export', async (c) => {
           vertical: 'middle',
           wrapText: false,
         },
-        font: { size: 9 },
+        font: isLink
+          ? { size: 9, color: { argb: 'FF0563C1' }, underline: true }
+          : { size: 9 },
       }
     }
     excelRow.commit()

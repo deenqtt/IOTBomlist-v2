@@ -1053,14 +1053,17 @@ products.get("/:id/export/bom", async (c) => {
     excelRow.getCell("D").value = item.partNumber ?? "";
     excelRow.getCell("E").value = qty;
     excelRow.getCell("F").value = "PCS";
-    excelRow.getCell("G").value = remark ? `${purchaseUrl}  [${remark}]` : purchaseUrl;
-    excelRow.getCell("J").value = item.links || "";
+    const gText = remark ? `${purchaseUrl}  [${remark}]` : purchaseUrl;
+    const jText = item.links || "";
+    excelRow.getCell("G").value = purchaseUrl ? { text: gText, hyperlink: purchaseUrl } : gText;
+    excelRow.getCell("J").value = jText ? { text: jText, hyperlink: jText } : jText;
 
     // Only style A-G and J — H/I are part of merged Remarks cell, don't touch them
     const cols = ["A", "B", "C", "D", "E", "F", "G", "J"] as const;
     for (const col of cols) {
       const cell = excelRow.getCell(col);
       const existingStyle = cell.style;
+      const isLink = (col === "G" && !!purchaseUrl) || (col === "J" && !!jText);
       cell.style = {
         ...existingStyle,
         fill: fillArgb ? {
@@ -1080,7 +1083,9 @@ products.get("/:id/export/bom", async (c) => {
           vertical: "middle",
           wrapText: false,
         },
-        font: { size: 9 },
+        font: isLink
+          ? { size: 9, color: { argb: "FF0563C1" }, underline: true }
+          : { size: 9 },
       };
     }
     excelRow.commit();
