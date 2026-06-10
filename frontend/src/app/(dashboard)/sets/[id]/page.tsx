@@ -75,6 +75,17 @@ export default function ProductEditPage() {
   // Costing Data
   const { data: costs, isLoading: costsLoading, isFetching: isFetchingCosts } = useSetCosts('USD', [setId])
   const costInfo = costs?.[0]
+  const [margin, setMargin] = useState<number>(() => {
+    if (typeof window === 'undefined') return 25
+    return Number(localStorage.getItem(`margin_set_${setId}`) ?? 25)
+  })
+  const targetQuote = costInfo ? costInfo.total / (1 - margin / 100) : 0
+
+  function handleMarginChange(val: string) {
+    const n = Math.min(99, Math.max(0, Number(val) || 0))
+    setMargin(n)
+    localStorage.setItem(`margin_set_${setId}`, String(n))
+  }
 
   useEffect(() => {
     if (!setId) return
@@ -466,6 +477,34 @@ export default function ProductEditPage() {
                             </div>
                           )}
                         </div>
+                      ) : (
+                        <span className="text-xl font-bold text-muted-foreground/30">—</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-bold text-primary uppercase tracking-wider">Target Quote</p>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={0}
+                          max={99}
+                          value={margin}
+                          onChange={e => handleMarginChange(e.target.value)}
+                          className="w-12 text-[10px] font-bold text-center border border-border rounded px-1 py-0.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary tabular-nums"
+                        />
+                        <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">% margin</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {costsLoading || isFetchingCosts ? (
+                        <Skeleton className="h-7 w-32 ml-auto" />
+                      ) : costInfo && costInfo.total > 0 ? (
+                        <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none font-mono text-lg font-black px-3 py-1">
+                          USD {fmt(targetQuote, 'USD')}
+                        </Badge>
                       ) : (
                         <span className="text-xl font-bold text-muted-foreground/30">—</span>
                       )}

@@ -89,7 +89,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { useProductCosts } from "@/hooks/useCosting";
 import { SupplierPricesMap } from "@/types";
-import { DollarSign, AlertCircle } from "lucide-react";
+import { DollarSign, AlertCircle, TrendingUp } from "lucide-react";
 
 import Image from "next/image";
 
@@ -1321,6 +1321,17 @@ export default function ProductDetailPage() {
   // Costing Data
   const { data: costs, isLoading: costsLoading, isFetching: isFetchingCosts } = useProductCosts('USD', [id]);
   const costInfo = costs?.[0];
+  const [margin, setMargin] = useState<number>(() => {
+    if (typeof window === 'undefined') return 25
+    return Number(localStorage.getItem(`margin_product_${id}`) ?? 25)
+  })
+  const targetQuote = costInfo ? costInfo.total / (1 - margin / 100) : 0
+
+  function handleMarginChange(val: string) {
+    const n = Math.min(99, Math.max(0, Number(val) || 0))
+    setMargin(n)
+    localStorage.setItem(`margin_product_${id}`, String(n))
+  }
 
   const [tab, setTab] = useState<"bom" | "usage" | "files">("bom");
   const [isSearching, setIsSearching] = useState(false);
@@ -1626,6 +1637,39 @@ export default function ProductDetailPage() {
               ) : (
                 <p className="text-2xl font-bold text-muted-foreground/30">—</p>
               )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card/50 border-primary/20 shadow-none">
+          <CardContent className="p-4 flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-primary/10 text-primary shrink-0">
+              <TrendingUp size={20} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-bold text-primary uppercase tracking-wider mb-1">Target Quote</p>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={0}
+                    max={99}
+                    value={margin}
+                    onChange={e => handleMarginChange(e.target.value)}
+                    className="w-12 text-[10px] font-bold text-center border border-border rounded px-1 py-0.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary tabular-nums"
+                  />
+                  <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">% margin</span>
+                </div>
+                {costsLoading || isFetchingCosts ? (
+                  <Skeleton className="h-7 w-28" />
+                ) : costInfo && costInfo.total > 0 ? (
+                  <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none font-mono text-lg font-black px-3 py-1">
+                    USD {fmt(targetQuote, 'USD')}
+                  </Badge>
+                ) : (
+                  <span className="text-xl font-bold text-muted-foreground/30">—</span>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>

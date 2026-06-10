@@ -75,8 +75,17 @@ export default function ProjectEditPage() {
   // Costing Data
   const { data: costs, isLoading: costsLoading, isFetching: isFetchingCosts } = useProjectCosts('USD', [projectId])
   const costInfo = costs?.[0]
-  const margin = 25
+  const [margin, setMargin] = useState<number>(() => {
+    if (typeof window === 'undefined') return 25
+    return Number(localStorage.getItem(`margin_project_${projectId}`) ?? 25)
+  })
   const targetQuote = costInfo ? costInfo.total / (1 - margin / 100) : 0
+
+  function handleMarginChange(val: string) {
+    const n = Math.min(99, Math.max(0, Number(val) || 0))
+    setMargin(n)
+    localStorage.setItem(`margin_project_${projectId}`, String(n))
+  }
 
   useEffect(() => {
     if (!projectId) return
@@ -471,9 +480,19 @@ export default function ProjectEditPage() {
                   </div>
 
                   <div className="flex justify-between items-start">
-                    <div className="space-y-0.5">
+                    <div className="space-y-1">
                       <p className="text-[10px] font-bold text-primary uppercase tracking-wider">Target Quote</p>
-                      <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-tight">at {margin}% margin</p>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={0}
+                          max={99}
+                          value={margin}
+                          onChange={e => handleMarginChange(e.target.value)}
+                          className="w-12 text-[10px] font-bold text-center border border-border rounded px-1 py-0.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary tabular-nums"
+                        />
+                        <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">% margin</span>
+                      </div>
                     </div>
                     <div className="text-right">
                       {costsLoading || isFetchingCosts ? (
