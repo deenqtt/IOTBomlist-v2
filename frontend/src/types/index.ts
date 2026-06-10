@@ -59,6 +59,7 @@ export interface Product {
   imageUrl?: string | null
   createdAt: string
   updatedAt: string
+  margin?: number | null
   _count?: {
     items?: number
   }

@@ -977,9 +977,7 @@ export default function ProductsPage() {
               ) : (
                 filteredProducts.map((product) => {
                   const costInfo = costs?.find(c => c.productId === product.id)
-                  const productMargin = typeof window !== 'undefined'
-                    ? Number(localStorage.getItem(`margin_product_${product.id}`) ?? 25)
-                    : 25
+                  const productMargin = product.margin ?? 25
                   const productQuote = costInfo && costInfo.total > 0
                     ? costInfo.total / (1 - productMargin / 100)
                     : 0

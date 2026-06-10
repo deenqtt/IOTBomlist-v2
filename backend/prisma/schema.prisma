@@ -27,6 +27,7 @@ model Product {
   estAltCostUSD  Float?            @map("est_alt_cost_usd")
   missingPrices  Int?              @map("missing_prices")
   costUpdatedAt  DateTime?         @map("cost_updated_at")
+  margin         Float?            @default(25)
   items          ProductItem[]
   relations      ProductRelation[] @relation("ParentRelations")
   childRelations ProductRelation[] @relation("ChildRelations")
@@ -102,6 +103,7 @@ model ConfigSet {
   estAltCostUSD Float?          @map("est_alt_cost_usd")
   missingPrices Int?            @map("missing_prices")
   costUpdatedAt DateTime?       @map("cost_updated_at")
+  margin        Float?          @default(25)
   parent        ConfigSet?      @relation("SetInheritance", fields: [parentSetId], references: [id])
   children      ConfigSet[]     @relation("SetInheritance")
   items         ConfigSetItem[]
@@ -137,6 +139,7 @@ model Superset {
   missingPrices      Int?           @map("missing_prices")
   costUpdatedAt      DateTime?      @map("cost_updated_at")
   budgetDrainersJson String?        @map("budget_drainers_json")
+  margin             Float?         @default(25)
   items              SupersetItem[]
 
   @@map("supersets")

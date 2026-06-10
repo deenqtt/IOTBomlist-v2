@@ -569,7 +569,7 @@ sets.post('/', requireRole('admin', 'super'), async (c) => {
 sets.patch('/:id', requireRole('admin', 'super'), async (c) => {
   const id = Number(c.req.param('id'))
   const user = c.get('user')
-  const { name, notes, parentSetId, items } = await c.req.json()
+  const { name, notes, parentSetId, items, margin } = await c.req.json()
   
   const old = await prisma.configSet.findUnique({ where: { id } })
   if (!old) return c.json({ error: 'Not found' }, 404)
@@ -584,6 +584,7 @@ sets.patch('/:id', requireRole('admin', 'super'), async (c) => {
       ...(name !== undefined && { name }),
       ...(notes !== undefined && { notes }),
       ...(parentSetId !== undefined && { parentSetId: parentSetId || null }),
+      ...(margin !== undefined && { margin: Number(margin) }),
       ...(items !== undefined && {
         items: {
           create: items.map((item: { mainProductId: number; op?: string; qty?: number; variantIds?: unknown[] }, idx: number) => ({

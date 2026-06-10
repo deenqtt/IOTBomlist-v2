@@ -77,16 +77,13 @@ export default function ProjectEditPage() {
   // Costing Data
   const { data: costs, isLoading: costsLoading, isFetching: isFetchingCosts } = useProjectCosts('USD', [projectId])
   const costInfo = costs?.[0]
-  const [margin, setMargin] = useState<number>(() => {
-    if (typeof window === 'undefined') return 25
-    return Number(localStorage.getItem(`margin_project_${projectId}`) ?? 25)
-  })
+  const [margin, setMargin] = useState<number>(25)
   const targetQuote = costInfo ? costInfo.total / (1 - margin / 100) : 0
 
   function handleMarginChange(val: string) {
     const n = Math.min(99, Math.max(0, Number(val) || 0))
     setMargin(n)
-    localStorage.setItem(`margin_project_${projectId}`, String(n))
+    api.patch(`/supersets/${projectId}`, { margin: n }).catch(() => {})
   }
 
   useEffect(() => {
@@ -101,6 +98,7 @@ export default function ProjectEditPage() {
         setRows(loaded)
         setProjectName(data.name)
         setNotes(data.notes ?? '')
+        if (data.margin != null) setMargin(data.margin)
         setLoading(false)
       })
       .catch(() => { setLoadError('Failed to load project'); setLoading(false) })

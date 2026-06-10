@@ -432,8 +432,8 @@ supersets.post('/', requireRole('admin', 'super'), async (c) => {
 supersets.patch('/:id', requireRole('admin', 'super'), async (c) => {
   const id = Number(c.req.param('id'))
   const user = c.get('user')
-  const { name, notes, items } = await c.req.json()
-  
+  const { name, notes, items, margin } = await c.req.json()
+
   const old = await prisma.superset.findUnique({ where: { id } })
   if (!old) return c.json({ error: 'Not found' }, 404)
 
@@ -443,6 +443,7 @@ supersets.patch('/:id', requireRole('admin', 'super'), async (c) => {
     data: {
       ...(name && { name }),
       ...(notes !== undefined && { notes }),
+      ...(margin !== undefined && { margin: Number(margin) }),
       items: {
         create: (items || []).map((item: any, idx: number) => ({
           orderIndex: idx,

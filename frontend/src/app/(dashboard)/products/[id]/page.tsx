@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import * as XLSX from "xlsx";
 import {
@@ -1321,16 +1321,16 @@ export default function ProductDetailPage() {
   // Costing Data
   const { data: costs, isLoading: costsLoading, isFetching: isFetchingCosts } = useProductCosts('USD', [id]);
   const costInfo = costs?.[0];
-  const [margin, setMargin] = useState<number>(() => {
-    if (typeof window === 'undefined') return 25
-    return Number(localStorage.getItem(`margin_product_${id}`) ?? 25)
-  })
+  const [margin, setMargin] = useState<number>(25)
+  useEffect(() => {
+    if (product?.margin != null) setMargin(product.margin)
+  }, [product?.margin])
   const targetQuote = costInfo ? costInfo.total / (1 - margin / 100) : 0
 
   function handleMarginChange(val: string) {
     const n = Math.min(99, Math.max(0, Number(val) || 0))
     setMargin(n)
-    localStorage.setItem(`margin_product_${id}`, String(n))
+    api.patch(`/products/${id}`, { margin: n }).catch(() => {})
   }
 
   const [tab, setTab] = useState<"bom" | "usage" | "files">("bom");

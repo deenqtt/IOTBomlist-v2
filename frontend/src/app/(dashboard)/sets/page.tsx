@@ -321,9 +321,7 @@ export default function SetsPage() {
               </tr>
             ) : filtered.map((s, i) => {
               const costInfo = costs?.find(c => c.setId === s.id)
-              const setMargin = typeof window !== 'undefined'
-                ? Number(localStorage.getItem(`margin_set_${s.id}`) ?? 25)
-                : 25
+              const setMargin = (s as any).margin ?? 25
               const setQuote = costInfo && costInfo.total > 0
                 ? costInfo.total / (1 - setMargin / 100)
                 : 0
