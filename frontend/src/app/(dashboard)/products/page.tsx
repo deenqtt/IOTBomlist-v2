@@ -949,6 +949,7 @@ export default function ProductsPage() {
                 <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">PCB Name</th>
                 <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-center whitespace-nowrap">Items</th>
                 <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right whitespace-nowrap">Est. Cost</th>
+                <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-primary text-right whitespace-nowrap">Target Quote</th>
                 <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">Last Updated</th>
                 <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right whitespace-nowrap">Actions</th>
               </tr>
@@ -976,6 +977,12 @@ export default function ProductsPage() {
               ) : (
                 filteredProducts.map((product) => {
                   const costInfo = costs?.find(c => c.productId === product.id)
+                  const productMargin = typeof window !== 'undefined'
+                    ? Number(localStorage.getItem(`margin_product_${product.id}`) ?? 25)
+                    : 25
+                  const productQuote = costInfo && costInfo.total > 0
+                    ? costInfo.total / (1 - productMargin / 100)
+                    : 0
                   return (
                     <tr key={product.id} className="group hover:bg-muted/30 transition-colors">
                       <td className="px-3 py-2.5">
@@ -1020,6 +1027,23 @@ export default function ProductsPage() {
                                 <AlertCircle size={8} /> {costInfo.missingPrices} missing
                               </div>
                             )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground/20 text-xs">—</span>
+                        )}
+                      </td>
+                      {/* Target Quote Column */}
+                      <td className="px-3 py-2.5 text-right">
+                        {costsLoading || isFetchingCosts ? (
+                          <div className="flex justify-end"><Loader2 size={14} className="animate-spin text-muted-foreground" /></div>
+                        ) : productQuote > 0 ? (
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span className="font-mono text-[13px] font-bold text-primary">
+                              USD {fmt(productQuote, 'USD')}
+                            </span>
+                            <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-tight">
+                              at {productMargin}% margin
+                            </span>
                           </div>
                         ) : (
                           <span className="text-muted-foreground/20 text-xs">—</span>

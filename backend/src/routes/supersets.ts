@@ -280,6 +280,24 @@ supersets.get('/:id/export', async (c) => {
 
   const DATA_START_ROW = 12
 
+  // Column widths — G/H/I merged as Remarks, J/K/L merged as DataSheet
+  ws.getColumn('A').width = 8
+  ws.getColumn('B').width = 22
+  ws.getColumn('C').width = 14
+  ws.getColumn('D').width = 22
+  ws.getColumn('E').width = 8
+  ws.getColumn('F').width = 7
+  ws.getColumn('G').width = 50
+  ws.getColumn('J').width = 50
+
+  // Clear template placeholder dashes in G and J
+  for (let r = DATA_START_ROW; r < DATA_START_ROW + 200; r++) {
+    for (const col of ['G', 'J'] as const) {
+      const cell = ws.getRow(r).getCell(col)
+      if (cell.value === '-' || cell.value === ' ' || cell.value === '–') cell.value = null
+    }
+  }
+
   // Group BOM rows by PCB for hierarchical display
   const grouped = new Map<number, typeof bomRows>()
   for (const r of bomRows) {
@@ -290,22 +308,30 @@ supersets.get('/:id/export', async (c) => {
 
   function writeExcelRow(rowNum: number, no: string | number, item: any, qty: number, fill: string | undefined, remarks: string, sup: any) {
     const excelRow = ws!.getRow(rowNum)
+    const purchaseUrl = getPurchaseUrl(item.supplierPrices, item.links, sup?.supplier)
+    const gText = remarks ? `${purchaseUrl}  [${remarks}]` : purchaseUrl
+    const jText = item.links || ''
+
     excelRow.getCell('A').value = no
     excelRow.getCell('B').value = item.manufacturer ?? ''
     excelRow.getCell('C').value = ''
     excelRow.getCell('D').value = item.partNumber ?? ''
     excelRow.getCell('E').value = qty
     excelRow.getCell('F').value = 'PCS'
-    excelRow.getCell('G').value = remarks || getPurchaseUrl(item.supplierPrices, item.links, sup?.supplier)
-    excelRow.getCell('J').value = item.links || ''
+    excelRow.getCell('G').value = purchaseUrl ? { text: gText, hyperlink: purchaseUrl } : gText
+    excelRow.getCell('J').value = jText ? { text: jText, hyperlink: jText } : jText
 
-    const cols = ['A','B','C','D','E','F','G','H','I','J'] as const
+    // Only A-G and J — H/I are merged with G (Remarks), don't touch them
+    const cols = ['A','B','C','D','E','F','G','J'] as const
     for (const col of cols) {
       const cell = excelRow.getCell(col)
+      const isLink = (col === 'G' && !!purchaseUrl) || (col === 'J' && !!jText)
       cell.style = {
         ...cell.style,
         fill: fill ? { type: 'pattern', pattern: 'solid', fgColor: { argb: fill }, bgColor: { argb: fill } } : { type: 'pattern', pattern: 'none' },
-        border: { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} }
+        border: { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} },
+        alignment: { horizontal: 'left', vertical: 'middle', wrapText: false },
+        font: isLink ? { size: 9, color: { argb: 'FF0563C1' }, underline: true } : { size: 9 },
       }
     }
     excelRow.commit()

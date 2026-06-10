@@ -284,6 +284,7 @@ export default function SetsPage() {
               <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border">Base Product</th>
               <th className="text-center px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border">PCBs</th>
               <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border">Est. Cost</th>
+              <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-primary border-b border-border">Target Quote</th>
               <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border">Created By</th>
               <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border">Notes</th>
               <th className="border-b border-border px-4 py-2.5 w-28" />
@@ -320,6 +321,12 @@ export default function SetsPage() {
               </tr>
             ) : filtered.map((s, i) => {
               const costInfo = costs?.find(c => c.setId === s.id)
+              const setMargin = typeof window !== 'undefined'
+                ? Number(localStorage.getItem(`margin_set_${s.id}`) ?? 25)
+                : 25
+              const setQuote = costInfo && costInfo.total > 0
+                ? costInfo.total / (1 - setMargin / 100)
+                : 0
               return (
                 <tr
                   key={s.id}
@@ -386,6 +393,24 @@ export default function SetsPage() {
                             <AlertCircle size={8} /> {costInfo.missingPrices} missing
                           </div>
                         )}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground/20 text-xs">—</span>
+                    )}
+                  </td>
+
+                  {/* Target Quote */}
+                  <td className="px-4 py-3 text-right">
+                    {costsLoading || isFetchingCosts ? (
+                      <div className="flex justify-end"><Loader2 size={14} className="animate-spin text-muted-foreground" /></div>
+                    ) : setQuote > 0 ? (
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className="font-mono text-[13px] font-bold text-primary">
+                          USD {fmt(setQuote, 'USD')}
+                        </span>
+                        <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-tight">
+                          at {setMargin}% margin
+                        </span>
                       </div>
                     ) : (
                       <span className="text-muted-foreground/20 text-xs">—</span>

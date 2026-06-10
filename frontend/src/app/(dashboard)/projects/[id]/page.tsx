@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useSupersets, useUpdateSuperset, useDeleteSuperset } from '@/hooks/useSupersets'
+import { useSupersets, useUpdateSuperset, useDeleteSuperset, downloadSupersetBom } from '@/hooks/useSupersets'
 import { useSets } from '@/hooks/useSets'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
@@ -14,9 +14,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import api from '@/lib/api'
+import { getToken } from '@/lib/auth'
 import {
   Plus, Trash2, Save, RefreshCw, ArrowLeft,
-  Layers, FolderTree, LayoutGrid, Info, Copy, Settings2,
+  Layers, FolderTree, LayoutGrid, Info, Copy, Settings2, Download,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -68,6 +69,7 @@ export default function ProjectEditPage() {
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
 
+  const token = getToken() ?? ''
   const usedSetIds = new Set(rows.map(r => r.setId))
   const availableSets = products.filter(p => !usedSetIds.has(p.id))
   const totalQty = rows.reduce((s, r) => s + r.qty, 0)
@@ -219,6 +221,16 @@ export default function ProjectEditPage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {/* Export BOM */}
+          <div className="flex items-center gap-1 border border-border rounded-xl overflow-hidden h-12">
+            <button
+              onClick={() => downloadSupersetBom(projectId, projectName, token)}
+              className="h-12 px-3 text-sm font-semibold flex items-center gap-2 hover:bg-muted transition-colors text-foreground"
+              title="Export Project BOM"
+            >
+              <Download size={16} /> BOM
+            </button>
+          </div>
           <Button
             variant="outline"
             size="lg"
@@ -479,33 +491,6 @@ export default function ProjectEditPage() {
                     </div>
                   </div>
 
-                  <div className="flex justify-between items-start">
-                    <div className="space-y-1">
-                      <p className="text-[10px] font-bold text-primary uppercase tracking-wider">Target Quote</p>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          min={0}
-                          max={99}
-                          value={margin}
-                          onChange={e => handleMarginChange(e.target.value)}
-                          className="w-12 text-[10px] font-bold text-center border border-border rounded px-1 py-0.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary tabular-nums"
-                        />
-                        <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">% margin</span>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      {costsLoading || isFetchingCosts ? (
-                        <Skeleton className="h-7 w-32 ml-auto" />
-                      ) : costInfo && costInfo.total > 0 ? (
-                        <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none font-mono text-lg font-black px-3 py-1">
-                          USD {fmt(targetQuote, 'USD')}
-                        </Badge>
-                      ) : (
-                        <span className="text-xl font-bold text-muted-foreground/30">—</span>
-                      )}
-                    </div>
-                  </div>
                 </div>
 
                 <div className="pt-4 border-t border-border/50">
@@ -533,6 +518,47 @@ export default function ProjectEditPage() {
                         )
                       })}
                     </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Target Quote Card */}
+            <div className="bg-card border border-primary/20 rounded-3xl p-6 shadow-sm">
+              <h3 className="font-bold text-xs uppercase tracking-[0.15em] text-primary mb-4 flex items-center gap-2">
+                <div className="w-1.5 h-4 bg-primary rounded-full" />
+                Target Quote
+              </h3>
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-bold text-muted-foreground">Margin</span>
+                  <div className="flex items-center gap-2 flex-1">
+                    <input
+                      type="number"
+                      min={0}
+                      max={99}
+                      value={margin}
+                      onChange={e => handleMarginChange(e.target.value)}
+                      className="w-16 h-9 text-sm font-bold text-center border-2 border-border rounded-lg px-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary tabular-nums"
+                    />
+                    <span className="text-sm font-bold text-muted-foreground">%</span>
+                  </div>
+                </div>
+                <div className="pt-3 border-t border-border/50">
+                  {costsLoading || isFetchingCosts ? (
+                    <Skeleton className="h-10 w-full" />
+                  ) : costInfo && costInfo.total > 0 ? (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Sell at</span>
+                      <span className="text-3xl font-black tabular-nums tracking-tight text-primary">
+                        USD {fmt(targetQuote, 'USD')}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        Cost {fmt(costInfo.total, 'USD')} + {margin}% margin
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-2xl font-bold text-muted-foreground/30">—</span>
                   )}
                 </div>
               </div>
