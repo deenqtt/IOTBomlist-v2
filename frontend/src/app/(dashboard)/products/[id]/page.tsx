@@ -24,6 +24,7 @@ import { useItems } from "@/hooks/useItems";
 import { useAuth } from "@/hooks/useAuth";
 import { isAdmin } from "@/lib/auth";
 import api from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Trash2,
@@ -1310,6 +1311,7 @@ export default function ProductDetailPage() {
   const id = Number(rawId);
   const { user } = useAuth();
   const admin = isAdmin(user);
+  const qc = useQueryClient();
 
   const { data: product, isLoading: productLoading } = useProduct(id);
   const { data: bomItems, isLoading: itemsLoading } = useProductItems(id);
@@ -1330,7 +1332,11 @@ export default function ProductDetailPage() {
   function handleMarginChange(val: string) {
     const n = Math.min(99, Math.max(0, Number(val) || 0))
     setMargin(n)
-    api.patch(`/products/${id}`, { margin: n }).catch(() => {})
+    api.patch(`/products/${id}`, { margin: n }).then(() => {
+      qc.invalidateQueries({ queryKey: ['products'] })
+      qc.invalidateQueries({ queryKey: ['products-all'] })
+      qc.invalidateQueries({ queryKey: ['product', id] })
+    }).catch(() => {})
   }
 
   const [tab, setTab] = useState<"bom" | "usage" | "files">("bom");

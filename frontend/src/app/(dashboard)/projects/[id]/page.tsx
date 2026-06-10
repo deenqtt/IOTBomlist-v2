@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useSupersets, useUpdateSuperset, useDeleteSuperset, downloadSupersetBom } from '@/hooks/useSupersets'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSets } from '@/hooks/useSets'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +54,7 @@ export default function ProjectEditPage() {
   const params = useParams()
   const router = useRouter()
   const projectId = Number(params.id)
+  const qc = useQueryClient()
 
   const { refetch: refetchProjects } = useSupersets()
   const { data: productsData } = useSets()
@@ -83,7 +85,9 @@ export default function ProjectEditPage() {
   function handleMarginChange(val: string) {
     const n = Math.min(99, Math.max(0, Number(val) || 0))
     setMargin(n)
-    api.patch(`/supersets/${projectId}`, { margin: n }).catch(() => {})
+    api.patch(`/supersets/${projectId}`, { margin: n }).then(() => {
+      qc.invalidateQueries({ queryKey: ['supersets'] })
+    }).catch(() => {})
   }
 
   useEffect(() => {

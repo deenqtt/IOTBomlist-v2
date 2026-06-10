@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useSets, useDeleteSet, downloadSetBom } from '@/hooks/useSets'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAllProducts } from '@/hooks/useProducts'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
@@ -54,6 +55,7 @@ export default function ProductEditPage() {
   const params = useParams()
   const router = useRouter()
   const setId = Number(params.id)
+  const qc = useQueryClient()
 
   const { refetch: refetchSets } = useSets()
   const { data: productsData } = useAllProducts()
@@ -83,7 +85,9 @@ export default function ProductEditPage() {
   function handleMarginChange(val: string) {
     const n = Math.min(99, Math.max(0, Number(val) || 0))
     setMargin(n)
-    api.patch(`/sets/${setId}`, { margin: n }).catch(() => {})
+    api.patch(`/sets/${setId}`, { margin: n }).then(() => {
+      qc.invalidateQueries({ queryKey: ['sets'] })
+    }).catch(() => {})
   }
 
   useEffect(() => {
