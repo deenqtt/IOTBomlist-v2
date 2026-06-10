@@ -55,7 +55,7 @@ export function useDeleteSet() {
 }
 
 export function downloadSetBom(id: number, name: string, mode: string, token: string) {
-  const url = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/sets/${id}/export?mode=${mode}`
+  const url = `${process.env.NEXT_PUBLIC_API_URL || ''}/sets/${id}/export?mode=${mode}`
   fetch(url, { headers: { Authorization: `Bearer ${token}` } })
     .then(r => r.blob())
     .then(blob => {

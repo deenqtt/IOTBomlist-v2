@@ -232,9 +232,7 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
   const analyzeMutation = useAnalyzeImport()
   const createImportMutation = useCreateProductImport()
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  function processFile(file: File) {
     setImportFile(file)
 
     const reader = new FileReader()
@@ -276,6 +274,24 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
       }
     }
     reader.readAsBinaryString(file)
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    processFile(file)
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    const file = e.dataTransfer.files?.[0]
+    if (!file) return
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (!['csv', 'xlsx', 'xls'].includes(ext || '')) {
+      toast.error('Only .csv, .xlsx, .xls files supported')
+      return
+    }
+    processFile(file)
   }
 
   async function handleAnalyze() {
@@ -626,7 +642,7 @@ function ImportNewProductModal({ onClose, onSuccess }: { onClose: () => void; on
         {step === 1 && (
           <div className="p-6 space-y-4">
             {!importFile ? (
-              <div onClick={() => fileRef.current?.click()} className="border-2 border-dashed border-border/60 hover:border-blue-500/50 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 bg-card/50 cursor-pointer transition-all hover:bg-blue-500/5 group">
+              <div onClick={() => fileRef.current?.click()} onDragOver={e => e.preventDefault()} onDrop={handleDrop} className="border-2 border-dashed border-border/60 hover:border-blue-500/50 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 bg-card/50 cursor-pointer transition-all hover:bg-blue-500/5 group">
                 <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-muted-foreground group-hover:bg-blue-500/10 group-hover:text-blue-500 transition-all">
                   <FileText size={28} />
                 </div>
@@ -966,7 +982,7 @@ export default function ProductsPage() {
                         <button onClick={() => router.push(`/products/${product.id}`)} className="flex items-center gap-3 text-left">
                           <div className="w-8 h-8 rounded-lg border border-border bg-muted overflow-hidden flex items-center justify-center shrink-0 relative">
                             {product.imageUrl ? (
-                              <Image src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/${product.imageUrl}`} alt="" fill className="object-cover" />
+                              <Image src={`${process.env.NEXT_PUBLIC_API_URL || ''}/${product.imageUrl}`} alt="" fill className="object-cover" />
                             ) : (
                               <Package size={14} className="text-muted-foreground/40" />
                             )}

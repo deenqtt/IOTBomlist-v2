@@ -82,7 +82,7 @@ export function useDeleteSuperset() {
 }
 
 export function downloadSupersetBom(id: number, name: string, token: string) {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || ''
   return fetch(`${baseUrl}/supersets/${id}/export`, {
     headers: { 'Authorization': `Bearer ${token}` }
   }).then(r => r.blob()).then(blob => {

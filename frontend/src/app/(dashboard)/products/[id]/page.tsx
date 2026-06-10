@@ -1462,7 +1462,7 @@ export default function ProductDetailPage() {
             >
               {product?.imageUrl ? (
                 <Image
-                  src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/${product.imageUrl}`}
+                  src={`${process.env.NEXT_PUBLIC_API_URL || ''}/${product.imageUrl}`}
                   alt="PCB"
                   fill
                   className="object-cover"
