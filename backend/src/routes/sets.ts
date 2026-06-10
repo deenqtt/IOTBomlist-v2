@@ -378,20 +378,41 @@ sets.get('/:id/export', async (c) => {
   const DATA_START_ROW = 12
   const user = c.get('user')
 
+  // Clear template placeholder dashes in Remarks (G) and DataSheet (J) columns
+  for (let r = DATA_START_ROW; r < DATA_START_ROW + 200; r++) {
+    for (const col of ['G', 'J'] as const) {
+      const cell = ws.getRow(r).getCell(col)
+      if (cell.value === '-' || cell.value === ' ' || cell.value === '–') {
+        cell.value = null
+      }
+    }
+  }
+
+  // Set column widths — G/H/I are merged as Remarks, J/K/L merged as DataSheet
+  ws.getColumn('A').width = 8
+  ws.getColumn('B').width = 22
+  ws.getColumn('C').width = 14
+  ws.getColumn('D').width = 22
+  ws.getColumn('E').width = 8
+  ws.getColumn('F').width = 7
+  ws.getColumn('G').width = 50   // Remarks (purchase URL)
+  ws.getColumn('J').width = 50   // DataSheet
+
   // Generic write row helper with styling
   function writeExcelRow(rowNum: number, data: DataRow, customNo?: string | number) {
     const excelRow = ws!.getRow(rowNum)
     excelRow.getCell('A').value = customNo ?? data.no
     excelRow.getCell('B').value = data.manufacturer
-    excelRow.getCell('C').value = '' // Blank P/N GSPE
+    excelRow.getCell('C').value = ''
     excelRow.getCell('D').value = data.partNumber
     excelRow.getCell('E').value = data.totalQty
     excelRow.getCell('F').value = 'PCS'
-    excelRow.getCell('G').value = data.purchaseUrl
-    excelRow.getCell('H').value = data.remarks || ''
+    excelRow.getCell('G').value = data.remarks
+      ? `${data.purchaseUrl}  [${data.remarks}]`
+      : data.purchaseUrl
     excelRow.getCell('J').value = data.datasheetUrl
 
-    const cols = ['A','B','C','D','E','F','G','H','I','J'] as const
+    const cols = ['A','B','C','D','E','F','G','J'] as const
     for (const col of cols) {
       const cell = excelRow.getCell(col)
       const existingStyle = cell.style
@@ -408,7 +429,13 @@ sets.get('/:id/export', async (c) => {
           left: { style: 'thin' },
           bottom: { style: 'thin' },
           right: { style: 'thin' },
-        }
+        },
+        alignment: {
+          horizontal: 'left',
+          vertical: 'middle',
+          wrapText: false,
+        },
+        font: { size: 9 },
       }
     }
     excelRow.commit()

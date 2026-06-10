@@ -998,6 +998,26 @@ products.get("/:id/export/bom", async (c) => {
 
   const DATA_START_ROW = 12;
 
+  // Column widths — G/H/I merged as Remarks, J/K/L merged as DataSheet
+  ws.getColumn('A').width = 8;
+  ws.getColumn('B').width = 22;
+  ws.getColumn('C').width = 14;
+  ws.getColumn('D').width = 22;
+  ws.getColumn('E').width = 8;
+  ws.getColumn('F').width = 7;
+  ws.getColumn('G').width = 50;
+  ws.getColumn('J').width = 50;
+
+  // Clear template placeholder dashes in Remarks (G) and DataSheet (J) columns
+  for (let r = DATA_START_ROW; r < DATA_START_ROW + 200; r++) {
+    for (const col of ['G', 'J'] as const) {
+      const cell = ws.getRow(r).getCell(col);
+      if (cell.value === '-' || cell.value === ' ' || cell.value === '–') {
+        cell.value = null;
+      }
+    }
+  }
+
   // Pre-fetch all alt items unconditionally so they are available for auto-swapping
   const altItemsCache = new Map<string, Item>();
   const allAltIds = bomRows.flatMap((r) =>
@@ -1020,65 +1040,50 @@ products.get("/:id/export/bom", async (c) => {
     no: number | string,
     item: Item | Partial<Item>,
     qty: number,
-    fillArgb?: string, // e.g. 'FFFFF2CC' for light yellow or 'FFFF0000' for red
+    fillArgb?: string,
+    remark?: string,
   ) {
     const excelRow = ws!.getRow(rowNum);
-    const {
-      supplier: winner,
-    } = getEffectiveSupplier(item as any);
+    const { supplier: winner } = getEffectiveSupplier(item as any);
     const purchaseUrl = getPurchaseUrl(item.supplierPrices, item.links, winner);
-
-    let rowFill = fillArgb; // Use passed color directly
 
     excelRow.getCell("A").value = no;
     excelRow.getCell("B").value = item.manufacturer ?? "";
-    excelRow.getCell("C").value = ""; // Dikosongkan untuk diisi manual oleh perusahaan
-    excelRow.getCell("D").value = item.partNumber ?? ""; // Part Number digeser ke kolom Description
+    excelRow.getCell("C").value = "";
+    excelRow.getCell("D").value = item.partNumber ?? "";
     excelRow.getCell("E").value = qty;
     excelRow.getCell("F").value = "PCS";
-    excelRow.getCell("G").value = purchaseUrl;
+    excelRow.getCell("G").value = remark ? `${purchaseUrl}  [${remark}]` : purchaseUrl;
     excelRow.getCell("J").value = item.links || "";
 
-    const cols = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
-
-    if (rowFill) {
-      for (const col of cols) {
-        const cell = excelRow.getCell(col);
-        const existingStyle = cell.style;
-        cell.style = {
-          ...existingStyle,
-          fill: {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: rowFill },
-            bgColor: { argb: rowFill },
-          },
-          border: {
-            top: { style: "thin" },
-            left: { style: "thin" },
-            bottom: { style: "thin" },
-            right: { style: "thin" },
-          },
-        };
-      }
-    } else {
-      // Explicitly reset to white/no-fill for normal rows
-      for (const col of cols) {
-        const cell = excelRow.getCell(col);
-        const existingStyle = cell.style;
-        cell.style = {
-          ...existingStyle,
-          fill: { type: "pattern", pattern: "none" },
-          border: {
-            top: { style: "thin" },
-            left: { style: "thin" },
-            bottom: { style: "thin" },
-            right: { style: "thin" },
-          },
-        };
-      }
+    // Only style A-G and J — H/I are part of merged Remarks cell, don't touch them
+    const cols = ["A", "B", "C", "D", "E", "F", "G", "J"] as const;
+    for (const col of cols) {
+      const cell = excelRow.getCell(col);
+      const existingStyle = cell.style;
+      cell.style = {
+        ...existingStyle,
+        fill: fillArgb ? {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: fillArgb },
+          bgColor: { argb: fillArgb },
+        } : { type: "pattern", pattern: "none" },
+        border: {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
+        },
+        alignment: {
+          horizontal: "left",
+          vertical: "middle",
+          wrapText: false,
+        },
+        font: { size: 9 },
+      };
     }
-    excelRow.commit(); 
+    excelRow.commit();
   }
 
   let currentRow = DATA_START_ROW;
@@ -1159,7 +1164,10 @@ products.get("/:id/export/bom", async (c) => {
     }
 
     // Write primary item row (swapped or original)
-    writeRow(currentRow, no, itemToExport, row.quantitySum ?? 0, rowFill);
+    const swapRemark = isSwapped && row.item
+      ? `Swapped from ${(row.item as any).partNumber ?? 'original'}`
+      : undefined;
+    writeRow(currentRow, no, itemToExport, row.quantitySum ?? 0, rowFill, swapRemark);
     currentRow++;
     no++;
   }
