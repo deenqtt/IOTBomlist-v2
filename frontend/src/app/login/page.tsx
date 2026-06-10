@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { Eye, EyeOff, Layers, ShieldCheck, Cpu } from 'lucide-react'
 import api from '@/lib/api'
-import { setToken } from '@/lib/auth'
+import { setToken, getUser } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
 const features = [
@@ -36,7 +36,10 @@ export default function LoginPage() {
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
 
-  useEffect(() => { setMounted(true) }, [])
+  useEffect(() => {
+    setMounted(true)
+    if (getUser()) router.replace('/items')
+  }, [router])
 
   const iconSrc = !mounted ? '/icon/icon_dark.svg'
     : resolvedTheme === 'dark' ? '/icon/icon_light.svg' : '/icon/icon_dark.svg'
@@ -50,7 +53,7 @@ export default function LoginPage() {
     try {
       const res = await api.post('/auth/login', { username, password })
       setToken(res.data.token)
-      router.push('/items')
+      router.replace('/items')
     } catch {
       setError('Invalid username or password')
     } finally {

@@ -12,10 +12,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router   = useRouter()
   const bp       = useBreakpoint()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [checking, setChecking] = useState(true)
 
   useEffect(() => {
     const user = getUser()
-    if (!user) router.replace('/login')
+    if (!user) {
+      router.replace('/login')
+    } else {
+      setChecking(false)
+    }
   }, [router])
 
   // Close drawer on route change (desktop resize)
@@ -24,6 +29,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [bp])
 
   const isMobile = bp === 'mobile'
+
+  if (checking) return null
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
