@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useSets, useSetContents, useRenameSet, useDeleteSet, downloadSetBom } from '@/hooks/useSets'
+import { useSets, useSetContents, useDeleteSet, downloadSetBom } from '@/hooks/useSets'
 import { useAuth } from '@/hooks/useAuth'
 import { isAdmin } from '@/lib/auth'
 import { getToken } from '@/lib/auth'
@@ -11,7 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import {
-  Search, Pencil, Trash2, Download, ChevronRight,
+  Search, Trash2, Download, ChevronRight,
   X, Layers, FileText, RefreshCw, Plus, Settings2, Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -30,58 +30,6 @@ function fmt(n: number, currency: string): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n);
-}
-
-/* ─── rename modal ───────────────────────────────────────── */
-
-function RenameModal({ product, onClose, onSave }: {
-  product: { id: number; name: string }
-  onClose: () => void
-  onSave: (name: string) => Promise<void>
-}) {
-  const [name, setName] = useState(product.name)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  async function handleSave() {
-    if (!name.trim() || name.trim() === product.name) { onClose(); return }
-    setLoading(true); setError('')
-    try {
-      await onSave(name.trim())
-      toast.success('Product renamed')
-      onClose()
-    } catch { setError('Rename failed') }
-    finally { setLoading(false) }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-card border border-border rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4">
-        <h3 className="font-semibold text-sm mb-4">Rename Product</h3>
-        <input
-          value={name}
-          onChange={e => setName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSave()}
-          className="w-full px-3 py-2 text-sm border border-input rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-          autoFocus
-        />
-        {error && <p className="text-xs text-destructive mt-2">{error}</p>}
-        <div className="flex gap-2 justify-end mt-4">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg hover:bg-accent transition-colors">
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={loading || !name.trim()}
-            className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity flex items-center gap-1.5"
-          >
-            {loading ? <><RefreshCw size={12} className="animate-spin" /> Saving…</> : 'Save'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 /* ─── product contents side panel ────────────────────────────── */
@@ -239,12 +187,10 @@ export default function SetsPage() {
   const router = useRouter()
 
   const { data: sets, isLoading, refetch, isFetching } = useSets()
-  const renameSet = useRenameSet()
   const deleteSet = useDeleteSet()
 
   const [q, setQ] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<{ id: number; name: string } | null>(null)
-  const [renameTarget, setRenameTarget] = useState<{ id: number; name: string } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null)
 
   const filtered = (sets ?? []).filter(s =>
@@ -476,13 +422,6 @@ export default function SetsPage() {
                             <Settings2 size={13} />
                           </button>
                           <button
-                            onClick={() => setRenameTarget({ id: s.id, name: s.name })}
-                            className="p-1.5 rounded-md hover:bg-accent text-muted-foreground/50 hover:text-foreground transition-colors"
-                            title="Rename"
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
                             onClick={() => setDeleteTarget({ id: s.id, name: s.name })}
                             className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground/50 hover:text-destructive transition-colors"
                             title="Delete"
@@ -507,15 +446,6 @@ export default function SetsPage() {
           productId={selectedProduct.id}
           productName={selectedProduct.name}
           onClose={() => setSelectedProduct(null)}
-        />
-      )}
-
-      {/* Rename modal */}
-      {renameTarget && admin && (
-        <RenameModal
-          product={renameTarget}
-          onClose={() => setRenameTarget(null)}
-          onSave={name => renameSet.mutateAsync({ id: renameTarget.id, name })}
         />
       )}
 
