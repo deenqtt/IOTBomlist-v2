@@ -84,6 +84,7 @@ export interface ConfigSet {
   createdBy?: string
   createdAt: string
   updatedAt: string
+  margin?: number | null
   parent?: ConfigSet
   items?: ConfigSetItem[]
 }
