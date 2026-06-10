@@ -387,7 +387,8 @@ sets.get('/:id/export', async (c) => {
     excelRow.getCell('D').value = data.partNumber
     excelRow.getCell('E').value = data.totalQty
     excelRow.getCell('F').value = 'PCS'
-    excelRow.getCell('G').value = data.remarks || data.purchaseUrl
+    excelRow.getCell('G').value = data.purchaseUrl
+    excelRow.getCell('H').value = data.remarks || ''
     excelRow.getCell('J').value = data.datasheetUrl
 
     const cols = ['A','B','C','D','E','F','G','H','I','J'] as const
@@ -413,7 +414,7 @@ sets.get('/:id/export', async (c) => {
     excelRow.commit()
   }
 
-  if (mode === 'original') {
+  if (mode === 'original' || mode === 'alternative') {
     // Group rows by product, add product header rows
     let currentRow = DATA_START_ROW
     const grouped = new Map<number, DataRow[]>()
@@ -456,7 +457,7 @@ sets.get('/:id/export', async (c) => {
       groupNo++
     }
   } else {
-    // combined / alternative — flat rows
+    // combined — flat rows, sequential numbering
     dataRows.forEach((row, i) => {
       writeExcelRow(DATA_START_ROW + i, row)
     })
